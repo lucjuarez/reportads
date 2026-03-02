@@ -71,7 +71,7 @@ async function obtenerTipoCambio(currency) {
 }
 
 //////////////////////////////////////////////////////////
-// DETECTAR OBJETIVO REAL
+// DETECTAR OBJETIVO REAL (MEJORADO ANTI-BLOQUEOS META)
 //////////////////////////////////////////////////////////
 
 function detectarObjetivo(c) {
@@ -80,29 +80,40 @@ function detectarObjetivo(c) {
   const convLocation = (c.conversion_location || "").toUpperCase();
   const perfGoal = (c.performance_goal || "").toUpperCase();
   const convEvent = (c.conversion_event || "").toUpperCase();
+  const campName = (c.name || "").toUpperCase(); // Leemos el nombre de la campaña como Plan B
 
+  // Detección de Mensajes
   if (
     convLocation.includes("MESSAGE") ||
     convLocation.includes("WHATSAPP") ||
     convLocation.includes("INSTAGRAM") ||
     optGoal.includes("MESSAGE") ||
     optGoal.includes("CONVERSATION") ||
-    objective.includes("MESSAGE")
+    objective.includes("MESSAGE") ||
+    objective.includes("OUTCOME_ENGAGEMENT") ||
+    campName.includes("MENSAJE") ||
+    campName.includes("WSP") ||
+    campName.includes("WHATSAPP")
   ) return "message";
 
-  if (objective.includes("LEAD") || optGoal.includes("LEAD"))
+  // Detección de Leads
+  if (objective.includes("LEAD") || optGoal.includes("LEAD") || campName.includes("LEAD"))
     return "lead";
 
-  if (convEvent.includes("PURCHASE") || optGoal.includes("PURCHASE"))
+  // Detección de Compras
+  if (convEvent.includes("PURCHASE") || optGoal.includes("PURCHASE") || campName.includes("COMPRA"))
     return "purchase";
 
-  if (convEvent.includes("ADD_TO_CART") || optGoal.includes("ADD_TO_CART"))
+  // Detección de Carritos
+  if (convEvent.includes("ADD_TO_CART") || optGoal.includes("ADD_TO_CART") || campName.includes("CARRITO"))
     return "cart";
 
+  // Detección de Visitas al Perfil
   if (objective.includes("TRAFFIC") && perfGoal.includes("PROFILE"))
     return "profile_visit";
 
-  if (objective.includes("TRAFFIC"))
+  // Detección de Landing Page Views
+  if (objective.includes("TRAFFIC") || objective.includes("OUTCOME_TRAFFIC") || campName.includes("TRAFICO"))
     return "lpv";
 
   return "unknown";
