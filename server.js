@@ -15,16 +15,16 @@ const openai = new OpenAI({
 });
 
 //////////////////////////////////////////////////////////
-// CONFIGURACIÓN GLOBAL (más flexible que ClariAds)
+// CONFIG GLOBAL REPORTADS
 //////////////////////////////////////////////////////////
 
 const BENCHMARK_ARS = {
-  message: { acceptable: 1200, high: 2500 },
-  lead: { acceptable: 18000, high: 35000 },
-  purchase: { acceptable: 25000, high: 50000 },
-  cart: { acceptable: 10000, high: 18000 },
-  profile_visit: { acceptable: 700, high: 1500 },
-  lpv: { acceptable: 700, high: 1500 }
+  message: { acceptable: 1000, high: 2000 },
+  lead: { acceptable: 15000, high: 30000 },
+  purchase: { acceptable: 20000, high: 40000 },
+  cart: { acceptable: 8000, high: 15000 },
+  profile_visit: { acceptable: 500, high: 1200 },
+  lpv: { acceptable: 500, high: 1200 }
 };
 
 let exchangeCache = {
@@ -65,14 +65,13 @@ async function obtenerTipoCambio(currency) {
 
     exchangeCache = { rate, currency, timestamp: now };
     return rate;
-  } catch (e) {
-    console.log("Error tipo de cambio, usando 1");
+  } catch {
     return 1;
   }
 }
 
 //////////////////////////////////////////////////////////
-// DETECTAR OBJETIVO REAL (IGUAL A CLARIADS)
+// DETECCIÓN ULTRA ROBUSTA OBJETIVO
 //////////////////////////////////////////////////////////
 
 function detectarObjetivo(c) {
@@ -81,6 +80,7 @@ function detectarObjetivo(c) {
   const convLocation = (c.conversion_location || "").toUpperCase();
   const perfGoal = (c.performance_goal || "").toUpperCase();
   const convEvent = (c.conversion_event || "").toUpperCase();
+  const name = (c.name || "").toUpperCase();
 
   if (
     convLocation.includes("MESSAGE") ||
@@ -88,7 +88,8 @@ function detectarObjetivo(c) {
     convLocation.includes("INSTAGRAM") ||
     optGoal.includes("MESSAGE") ||
     optGoal.includes("CONVERSATION") ||
-    objective.includes("MESSAGE")
+    objective.includes("MESSAGE") ||
+    name.includes("MENSAJE")
   ) return "message";
 
   if (objective.includes("LEAD") || optGoal.includes("LEAD"))
@@ -123,12 +124,12 @@ function evaluarCosto(objetivo, costoARS) {
 }
 
 //////////////////////////////////////////////////////////
-// SCORE MATEMÁTICO (SUAVIZADO PARA DUEÑO)
+// SCORE MATEMÁTICO GLOBAL
 //////////////////////////////////////////////////////////
 
 async function calcularScore(data, currency) {
   const rate = await obtenerTipoCambio(currency);
-  let score = 6;
+  let score = 5;
 
   for (const c of data.campañas_detalle || []) {
     const spend = n(c.spend);
@@ -140,25 +141,26 @@ async function calcularScore(data, currency) {
     if (objetivo === "lead") resultados = n(c.leads);
     if (objetivo === "purchase") resultados = n(c.pur);
     if (objetivo === "cart") resultados = n(c.cart);
+    if (objetivo === "profile_visit") resultados = n(c.clicks);
     if (objetivo === "lpv") resultados = n(c.lpv);
 
     const costoResultado = costo(resultados, spend);
     const costoARS = costoResultado ? costoResultado * rate : null;
     const nivel = evaluarCosto(objetivo, costoARS);
 
-    if (nivel === "success") score += 0.6;
-    if (nivel === "warning") score -= 0.4;
-    if (nivel === "danger") score -= 1;
+    if (nivel === "success") score += 0.8;
+    if (nivel === "warning") score -= 0.5;
+    if (nivel === "danger") score -= 1.2;
 
-    if (spend > 0 && resultados === 0) score -= 1;
+    if (spend > 0 && resultados === 0) score -= 1.5;
 
     const freq = n(c.freq);
-    if (freq > 4.5) score -= 0.7;
+    if (freq > 4.5) score -= 1;
 
     if (objetivo === "purchase" && spend > 0) {
       const roas = n(c.val) / spend;
       if (roas < 1) score -= 1;
-      if (roas >= 2) score += 0.6;
+      if (roas >= 2) score += 0.5;
     }
   }
 
@@ -167,96 +169,97 @@ async function calcularScore(data, currency) {
 }
 
 //////////////////////////////////////////////////////////
-// MÉTRICAS GLOBALES
+// ANALISIS DE PUBLICO
 //////////////////////////////////////////////////////////
 
-function calcularResumenGlobal(data) {
-  let totalSpend = 0;
-  let totalCompras = 0;
-  let totalLeads = 0;
-  let totalValor = 0;
+function analizarPublicoPorCampaña(data) {
+  const campañas = data.campañas_detalle || [];
 
-  (data.campañas_detalle || []).forEach(c => {
-    totalSpend += n(c.spend);
-    totalCompras += n(c.pur);
-    totalLeads += n(c.leads);
-    totalValor += n(c.val);
+  return campañas.map(c => {
+    const edades = {};
+    const generos = {};
+    const paises = {};
+
+    (c.breakdowns || []).forEach(b => {
+      const resultados = n(b.resultados);
+      if (b.age) edades[b.age] = (edades[b.age] || 0) + resultados;
+      if (b.gender) generos[b.gender] = (generos[b.gender] || 0) + resultados;
+      if (b.country) paises[b.country] = (paises[b.country] || 0) + resultados;
+    });
+
+    return {
+      id: c.id,
+      mejor_segmento_edad:
+        Object.entries(edades).sort((a,b)=>b[1]-a[1])[0]?.[0] || null,
+      mejor_genero:
+        Object.entries(generos).sort((a,b)=>b[1]-a[1])[0]?.[0] || null,
+      top_3_paises:
+        Object.entries(paises)
+          .sort((a,b)=>b[1]-a[1])
+          .slice(0,3)
+          .map(p=>p[0])
+    };
   });
-
-  const roasGlobal = totalSpend > 0 ? totalValor / totalSpend : 0;
-
-  return {
-    totalSpend,
-    totalCompras,
-    totalLeads,
-    roasGlobal: Number(roasGlobal.toFixed(2))
-  };
 }
 
 //////////////////////////////////////////////////////////
-// MOTOR IA – ENFOQUE EJECUTIVO
+// MOTOR IA REPORTADS
 //////////////////////////////////////////////////////////
 
 async function analizarConIA(data, currency) {
 
   const scoreBase = await calcularScore(data, currency);
-  const resumenGlobal = calcularResumenGlobal(data);
+  const publicoPorCampaña = analizarPublicoPorCampaña(data);
 
   const campañasProcesadas = (data.campañas_detalle || []).map(c => {
     const objetivo = detectarObjetivo(c);
 
+    let resultados = 0;
+    if (objetivo === "message") resultados = n(c.msg);
+    if (objetivo === "lead") resultados = n(c.leads);
+    if (objetivo === "purchase") resultados = n(c.pur);
+    if (objetivo === "cart") resultados = n(c.cart);
+    if (objetivo === "lpv") resultados = n(c.lpv);
+
     return {
       id: c.id,
       name: c.name,
-      objetivo_detectado: objetivo,
-      inversion: n(c.spend),
-      compras: n(c.pur),
-      leads: n(c.leads),
-      roas: n(c.spend) > 0 ? n(c.val) / n(c.spend) : 0
+      objetivo,
+      resultados,
+      frecuencia: n(c.freq)
     };
   });
 
   const prompt = `
-Actúa como consultor senior de marketing digital.
+Actúa como consultor senior de marketing.
 
-Este reporte es para un dueño de negocio.
-
-Datos globales:
-- Inversión total: ${resumenGlobal.totalSpend}
-- Compras totales: ${resumenGlobal.totalCompras}
-- Leads totales: ${resumenGlobal.totalLeads}
-- ROAS global: ${resumenGlobal.roasGlobal}
-- Score del sistema: ${scoreBase}
+Score base: ${scoreBase}
 
 Devuelve SOLO JSON válido:
 
 {
   "score": number,
-  "resumen_ejecutivo": "diagnóstico estratégico global claro",
+  "resumen_ejecutivo": "string",
+  "urgencia": "ESCALAR | ESTABLE | OPTIMIZAR | ALERTA",
+  "plan_accion": ["string"],
+  "recomendacion_final": "string",
   "analisis_campañas": [
     {
       "id": "string",
-      "comentario": "explicación clara, sin tecnicismos"
+      "feedback_ia": "string",
+      "status_ia": "success | warning | danger"
     }
   ]
 }
 
-Reglas:
-- Si ROAS < 1, indicar que la cuenta pierde dinero.
-- Si ROAS entre 1 y 2, indicar que está en punto de equilibrio.
-- Si ROAS > 2, indicar que es saludable.
-- Explicar cada campaña según su objetivo detectado.
-- Lenguaje simple y estratégico.
-
-Campañas:
+Datos campañas:
 ${JSON.stringify(campañasProcesadas, null, 2)}
 `;
 
   try {
-
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      temperature: 0.4,
+      temperature: 0.3,
       messages: [
         { role: "system", content: "Eres experto en performance marketing." },
         { role: "user", content: prompt }
@@ -270,17 +273,20 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
 
     const parsed = JSON.parse(text);
 
-    return parsed;
+    return {
+      ...parsed,
+      analisis_publico_por_campaña: publicoPorCampaña
+    };
 
-  } catch (error) {
-
+  } catch {
     return {
       score: scoreBase,
-      resumen_ejecutivo: "La cuenta fue procesada correctamente.",
-      analisis_campañas: campañasProcesadas.map(c => ({
-        id: c.id,
-        comentario: "Campaña evaluada correctamente."
-      }))
+      resumen_ejecutivo: "Diagnóstico automático.",
+      urgencia: "ESTABLE",
+      plan_accion: [],
+      recomendacion_final: "",
+      analisis_campañas: [],
+      analisis_publico_por_campaña: publicoPorCampaña
     };
   }
 }
@@ -294,7 +300,7 @@ app.post("/reporte", async (req, res) => {
     const currency = req.body.currency || "ARS";
     const resultado = await analizarConIA(req.body, currency);
     res.json(resultado);
-  } catch (err) {
+  } catch {
     res.status(500).json({ error: "Error interno" });
   }
 });
@@ -302,5 +308,5 @@ app.post("/reporte", async (req, res) => {
 const PORT = process.env.PORT || 10000;
 
 app.listen(PORT, () =>
-  console.log("🚀 ReportAds Executive activo en puerto " + PORT)
+  console.log("🚀 ReportAds Global activo en puerto " + PORT)
 );
