@@ -15,7 +15,7 @@ const openai = new OpenAI({
 });
 
 //////////////////////////////////////////////////////////
-// CONFIGURACIÓN GLOBAL
+// CONFIGURACIÓN GLOBAL DE REFERENCIAS (BENCHMARK)
 //////////////////////////////////////////////////////////
 
 const BENCHMARK_ARS = {
@@ -38,11 +38,6 @@ let exchangeCache = {
 //////////////////////////////////////////////////////////
 
 const n = (v) => Number(v) || 0;
-
-function costo(resultado, gasto) {
-  if (!resultado || resultado === 0) return null;
-  return gasto / resultado;
-}
 
 async function obtenerTipoCambio(currency) {
   if (currency === "ARS") return 1;
@@ -70,19 +65,14 @@ async function obtenerTipoCambio(currency) {
   }
 }
 
-//////////////////////////////////////////////////////////
-// DETECTAR OBJETIVO REAL (MEJORADO ANTI-BLOQUEOS META)
-//////////////////////////////////////////////////////////
-
 function detectarObjetivo(c) {
   const objective = (c.objective || "").toUpperCase();
   const optGoal = (c.optimization_goal || "").toUpperCase();
   const convLocation = (c.conversion_location || "").toUpperCase();
   const perfGoal = (c.performance_goal || "").toUpperCase();
   const convEvent = (c.conversion_event || "").toUpperCase();
-  const campName = (c.name || "").toUpperCase(); // Leemos el nombre de la campaña como Plan B
+  const campName = (c.name || "").toUpperCase(); 
 
-  // Detección de Mensajes
   if (
     convLocation.includes("MESSAGE") ||
     convLocation.includes("WHATSAPP") ||
@@ -96,36 +86,18 @@ function detectarObjetivo(c) {
     campName.includes("WHATSAPP")
   ) return "message";
 
-  // Detección de Leads
-  if (objective.includes("LEAD") || optGoal.includes("LEAD") || campName.includes("LEAD"))
-    return "lead";
-
-  // Detección de Compras
-  if (convEvent.includes("PURCHASE") || optGoal.includes("PURCHASE") || campName.includes("COMPRA"))
-    return "purchase";
-
-  // Detección de Carritos
-  if (convEvent.includes("ADD_TO_CART") || optGoal.includes("ADD_TO_CART") || campName.includes("CARRITO"))
-    return "cart";
-
-  // Detección de Visitas al Perfil
-  if (objective.includes("TRAFFIC") && perfGoal.includes("PROFILE"))
-    return "profile_visit";
-
-  // Detección de Landing Page Views
-  if (objective.includes("TRAFFIC") || objective.includes("OUTCOME_TRAFFIC") || campName.includes("TRAFICO"))
-    return "lpv";
+  if (objective.includes("LEAD") || optGoal.includes("LEAD") || campName.includes("LEAD")) return "lead";
+  if (convEvent.includes("PURCHASE") || optGoal.includes("PURCHASE") || campName.includes("COMPRA")) return "purchase";
+  if (convEvent.includes("ADD_TO_CART") || optGoal.includes("ADD_TO_CART") || campName.includes("CARRITO")) return "cart";
+  if (objective.includes("TRAFFIC") && perfGoal.includes("PROFILE")) return "profile_visit";
+  if (objective.includes("TRAFFIC") || objective.includes("OUTCOME_TRAFFIC") || campName.includes("TRAFICO")) return "lpv";
 
   return "unknown";
 }
 
-//////////////////////////////////////////////////////////
-// EVALUACIÓN COSTO
-//////////////////////////////////////////////////////////
-
 function evaluarCosto(objetivo, costoARS) {
   const ref = BENCHMARK_ARS[objetivo];
-  if (!ref || costoARS === null) return "neutral";
+  if (!ref || costoARS === null || costoARS === 0) return "neutral";
 
   if (costoARS <= ref.acceptable) return "success";
   if (costoARS > ref.high) return "danger";
@@ -133,7 +105,7 @@ function evaluarCosto(objetivo, costoARS) {
 }
 
 //////////////////////////////////////////////////////////
-// SCORE MATEMÁTICO
+// SCORE MATEMÁTICO BASADO EN VALORES DE META DIRECTOS
 //////////////////////////////////////////////////////////
 
 async function calcularScore(data, currency) {
@@ -143,18 +115,12 @@ async function calcularScore(data, currency) {
   for (const c of data.campañas_detalle || []) {
     const spend = n(c.spend);
     const objetivo = detectarObjetivo(c);
-
-    let resultados = 0;
-
-    if (objetivo === "message") resultados = n(c.msg);
-    if (objetivo === "lead") resultados = n(c.leads);
-    if (objetivo === "purchase") resultados = n(c.pur);
-    if (objetivo === "cart") resultados = n(c.cart);
-    if (objetivo === "profile_visit") resultados = n(c.clicks);
-    if (objetivo === "lpv") resultados = n(c.lpv);
-
-    const costoResultado = costo(resultados, spend);
-    const costoARS = costoResultado ? costoResultado * rate : null;
+    const resultados = n(c.resultados_obj);
+    
+    // Leemos el costo directamente de Meta
+    const costoMeta = n(c.cpr_meta);
+    const costoARS = costoMeta > 0 ? costoMeta * rate : null;
+    
     const nivel = evaluarCosto(objetivo, costoARS);
 
     if (nivel === "success") score += 0.8;
@@ -169,8 +135,8 @@ async function calcularScore(data, currency) {
     if (freq > 4.5) score -= 1.2;
 
     if (objetivo === "purchase" && spend > 0) {
-      const roas = n(c.val) / spend;
-      if (roas < 1) score -= 1;
+      const roas = n(c.roas_meta); // ROAS Directo de Meta
+      if (roas > 0 && roas < 1) score -= 1;
       if (roas >= 2) score += 0.5;
     }
   }
@@ -212,25 +178,14 @@ function analizarPublicoPorCampaña(data) {
       }
     });
 
-    const topEdad =
-      Object.entries(edades).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
-
-    const topGenero =
-      Object.entries(generos).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
-
-    const topPaises = Object.entries(paises)
-      .sort((a,b)=>b[1]-a[1])
-      .slice(0,3)
-      .map(p=>p[0]);
+    const topEdad = Object.entries(edades).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+    const topGenero = Object.entries(generos).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+    const topPaises = Object.entries(paises).sort((a,b)=>b[1]-a[1]).slice(0,3).map(p=>p[0]);
 
     const topCiudadesPorPais = {};
-
     topPaises.forEach(pais => {
       const ciudades = ciudadesPorPais[pais] || {};
-      topCiudadesPorPais[pais] = Object.entries(ciudades)
-        .sort((a,b)=>b[1]-a[1])
-        .slice(0,3)
-        .map(c=>c[0]);
+      topCiudadesPorPais[pais] = Object.entries(ciudades).sort((a,b)=>b[1]-a[1]).slice(0,3).map(c=>c[0]);
     });
 
     return {
@@ -244,59 +199,52 @@ function analizarPublicoPorCampaña(data) {
 }
 
 //////////////////////////////////////////////////////////
-// MOTOR IA
+// MOTOR IA: MODO "ANALISTA ESTRATÉGICO"
 //////////////////////////////////////////////////////////
 
 async function analizarConIA(data, currency) {
   const scoreBase = await calcularScore(data, currency);
   const publicoPorCampaña = analizarPublicoPorCampaña(data);
 
+  // Le pasamos a la IA los números crudos reportados por Meta
   const campañasProcesadas = (data.campañas_detalle || []).map(c => {
-    const objetivo = detectarObjetivo(c);
-    let resultados = 0;
-
-    if (objetivo === "message") resultados = n(c.msg);
-    if (objetivo === "lead") resultados = n(c.leads);
-    if (objetivo === "purchase") resultados = n(c.pur);
-    if (objetivo === "cart") resultados = n(c.cart);
-    if (objetivo === "lpv") resultados = n(c.lpv);
-
-    const costoResultado = costo(resultados, n(c.spend));
-
     return {
       id: c.id,
-      name: c.name,
-      objetivo_detectado: objetivo,
-      resultados,
-      costo_por_resultado: costoResultado,
+      nombre_campaña: c.name,
+      objetivo_detectado: detectarObjetivo(c),
+      inversion_total: n(c.spend),
+      resultados_principales: n(c.resultados_obj),
+      costo_por_resultado_meta: n(c.cpr_meta),
+      roas_meta: n(c.roas_meta),
+      ctr_meta: n(c.ctr_meta),
       frecuencia: n(c.freq)
     };
   });
 
   const prompt = `
-Actúa como Luciano Juárez.
+Actúa como Luciano Juárez, un estratega experto en Paid Media (Meta Ads).
 
-Score base: ${scoreBase}
+Te entregaré los KPIs directos y oficiales extraídos de la API de Facebook Ads. Tu tarea NO es calcular métricas matemáticas, sino leer estos datos y brindar un análisis profundo, estratégico y accionable sobre su rendimiento.
 
-Devuelve SOLO JSON válido con:
+Score de la cuenta: ${scoreBase} / 10
 
+Devuelve SOLO un JSON válido con esta estructura:
 {
   "score": number,
-  "diagnostico_general": "string",
+  "diagnostico_general": "string (Análisis general del rendimiento basado en la inversión, costos oficiales y resultados)",
   "urgencia": "ESCALAR | ESTABLE | OPTIMIZAR | ALERTA",
-  "plan_accion": ["string"],
-  "recomendacion_final": "string",
+  "plan_accion": ["string (Pasos tácticos)"],
+  "recomendacion_final": "string (Tu veredicto estratégico definitivo)",
   "analisis_campañas": [
     {
       "id": "string",
-      "feedback_ia": "string",
+      "feedback_ia": "string (Tu lectura de los costos y rendimiento oficiales reportados por Meta. ¿Es rentable? ¿Hay fatiga?)",
       "status_ia": "success | warning | danger"
     }
-  ],
-  "insight_publico": "string"
+  ]
 }
 
-Datos campañas:
+KPIs Oficiales extraídos de Meta:
 ${JSON.stringify(campañasProcesadas, null, 2)}
 `;
 
@@ -305,7 +253,7 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
       model: "gpt-4o-mini",
       temperature: 0.3,
       messages: [
-        { role: "system", content: "Eres experto en performance marketing." },
+        { role: "system", content: "Eres experto en análisis de performance de Meta Ads." },
         { role: "user", content: prompt }
       ]
     });
@@ -325,12 +273,11 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
   } catch (error) {
     return {
       score: scoreBase,
-      diagnostico_general: "Diagnóstico automático.",
+      diagnostico_general: "Error al generar diagnóstico. Verifica las métricas en Meta.",
       urgencia: "ESTABLE",
       plan_accion: [],
-      recomendacion_final: "",
+      recomendacion_final: "Las métricas se extrajeron de Meta, pero la IA no pudo procesar el análisis.",
       analisis_campañas: [],
-      insight_publico: "",
       analisis_publico_por_campaña: publicoPorCampaña
     };
   }
