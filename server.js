@@ -15,7 +15,7 @@ const openai = new OpenAI({
 });
 
 //////////////////////////////////////////////////////////
-// CONFIG GLOBAL REPORTADS
+// CONFIGURACIÓN GLOBAL
 //////////////////////////////////////////////////////////
 
 const BENCHMARK_ARS = {
@@ -48,7 +48,6 @@ async function obtenerTipoCambio(currency) {
   if (currency === "ARS") return 1;
 
   const now = Date.now();
-
   if (
     exchangeCache.currency === currency &&
     now - exchangeCache.timestamp < 1000 * 60 * 60
@@ -65,13 +64,14 @@ async function obtenerTipoCambio(currency) {
 
     exchangeCache = { rate, currency, timestamp: now };
     return rate;
-  } catch {
+  } catch (e) {
+    console.log("Error tipo de cambio, usando 1");
     return 1;
   }
 }
 
 //////////////////////////////////////////////////////////
-// DETECCIÓN ULTRA ROBUSTA OBJETIVO
+// DETECTAR OBJETIVO REAL
 //////////////////////////////////////////////////////////
 
 function detectarObjetivo(c) {
@@ -80,7 +80,6 @@ function detectarObjetivo(c) {
   const convLocation = (c.conversion_location || "").toUpperCase();
   const perfGoal = (c.performance_goal || "").toUpperCase();
   const convEvent = (c.conversion_event || "").toUpperCase();
-  const name = (c.name || "").toUpperCase();
 
   if (
     convLocation.includes("MESSAGE") ||
@@ -88,8 +87,7 @@ function detectarObjetivo(c) {
     convLocation.includes("INSTAGRAM") ||
     optGoal.includes("MESSAGE") ||
     optGoal.includes("CONVERSATION") ||
-    objective.includes("MESSAGE") ||
-    name.includes("MENSAJE")
+    objective.includes("MESSAGE")
   ) return "message";
 
   if (objective.includes("LEAD") || optGoal.includes("LEAD"))
@@ -98,7 +96,7 @@ function detectarObjetivo(c) {
   if (convEvent.includes("PURCHASE") || optGoal.includes("PURCHASE"))
     return "purchase";
 
-  if (convEvent.includes("ADD_TO_CART"))
+  if (convEvent.includes("ADD_TO_CART") || optGoal.includes("ADD_TO_CART"))
     return "cart";
 
   if (objective.includes("TRAFFIC") && perfGoal.includes("PROFILE"))
@@ -124,7 +122,7 @@ function evaluarCosto(objetivo, costoARS) {
 }
 
 //////////////////////////////////////////////////////////
-// SCORE MATEMÁTICO GLOBAL
+// SCORE MATEMÁTICO
 //////////////////////////////////////////////////////////
 
 async function calcularScore(data, currency) {
@@ -155,7 +153,9 @@ async function calcularScore(data, currency) {
     if (spend > 0 && resultados === 0) score -= 1.5;
 
     const freq = n(c.freq);
-    if (freq > 4.5) score -= 1;
+    if (freq > 2 && freq <= 3) score -= 0.3;
+    if (freq > 3 && freq <= 4.5) score -= 0.7;
+    if (freq > 4.5) score -= 1.2;
 
     if (objetivo === "purchase" && spend > 0) {
       const roas = n(c.val) / spend;
@@ -169,7 +169,7 @@ async function calcularScore(data, currency) {
 }
 
 //////////////////////////////////////////////////////////
-// ANALISIS DE PUBLICO
+// ANALISIS DE PUBLICO POR CAMPAÑA
 //////////////////////////////////////////////////////////
 
 function analizarPublicoPorCampaña(data) {
@@ -179,67 +179,99 @@ function analizarPublicoPorCampaña(data) {
     const edades = {};
     const generos = {};
     const paises = {};
+    const ciudadesPorPais = {};
 
     (c.breakdowns || []).forEach(b => {
       const resultados = n(b.resultados);
+
       if (b.age) edades[b.age] = (edades[b.age] || 0) + resultados;
       if (b.gender) generos[b.gender] = (generos[b.gender] || 0) + resultados;
-      if (b.country) paises[b.country] = (paises[b.country] || 0) + resultados;
+
+      if (b.country) {
+        paises[b.country] = (paises[b.country] || 0) + resultados;
+
+        if (!ciudadesPorPais[b.country]) {
+          ciudadesPorPais[b.country] = {};
+        }
+
+        if (b.city) {
+          ciudadesPorPais[b.country][b.city] =
+            (ciudadesPorPais[b.country][b.city] || 0) + resultados;
+        }
+      }
+    });
+
+    const topEdad =
+      Object.entries(edades).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+
+    const topGenero =
+      Object.entries(generos).sort((a,b)=>b[1]-a[1])[0]?.[0] || null;
+
+    const topPaises = Object.entries(paises)
+      .sort((a,b)=>b[1]-a[1])
+      .slice(0,3)
+      .map(p=>p[0]);
+
+    const topCiudadesPorPais = {};
+
+    topPaises.forEach(pais => {
+      const ciudades = ciudadesPorPais[pais] || {};
+      topCiudadesPorPais[pais] = Object.entries(ciudades)
+        .sort((a,b)=>b[1]-a[1])
+        .slice(0,3)
+        .map(c=>c[0]);
     });
 
     return {
       id: c.id,
-      mejor_segmento_edad:
-        Object.entries(edades).sort((a,b)=>b[1]-a[1])[0]?.[0] || null,
-      mejor_genero:
-        Object.entries(generos).sort((a,b)=>b[1]-a[1])[0]?.[0] || null,
-      top_3_paises:
-        Object.entries(paises)
-          .sort((a,b)=>b[1]-a[1])
-          .slice(0,3)
-          .map(p=>p[0])
+      mejor_segmento_edad: topEdad,
+      mejor_genero: topGenero,
+      top_3_paises: topPaises,
+      top_3_ciudades_por_pais: topCiudadesPorPais
     };
   });
 }
 
 //////////////////////////////////////////////////////////
-// MOTOR IA REPORTADS
+// MOTOR IA
 //////////////////////////////////////////////////////////
 
 async function analizarConIA(data, currency) {
-
   const scoreBase = await calcularScore(data, currency);
   const publicoPorCampaña = analizarPublicoPorCampaña(data);
 
   const campañasProcesadas = (data.campañas_detalle || []).map(c => {
     const objetivo = detectarObjetivo(c);
-
     let resultados = 0;
+
     if (objetivo === "message") resultados = n(c.msg);
     if (objetivo === "lead") resultados = n(c.leads);
     if (objetivo === "purchase") resultados = n(c.pur);
     if (objetivo === "cart") resultados = n(c.cart);
     if (objetivo === "lpv") resultados = n(c.lpv);
 
+    const costoResultado = costo(resultados, n(c.spend));
+
     return {
       id: c.id,
       name: c.name,
-      objetivo,
+      objetivo_detectado: objetivo,
       resultados,
+      costo_por_resultado: costoResultado,
       frecuencia: n(c.freq)
     };
   });
 
   const prompt = `
-Actúa como consultor senior de marketing.
+Actúa como Luciano Juárez.
 
 Score base: ${scoreBase}
 
-Devuelve SOLO JSON válido:
+Devuelve SOLO JSON válido con:
 
 {
   "score": number,
-  "resumen_ejecutivo": "string",
+  "diagnostico_general": "string",
   "urgencia": "ESCALAR | ESTABLE | OPTIMIZAR | ALERTA",
   "plan_accion": ["string"],
   "recomendacion_final": "string",
@@ -249,7 +281,8 @@ Devuelve SOLO JSON válido:
       "feedback_ia": "string",
       "status_ia": "success | warning | danger"
     }
-  ]
+  ],
+  "insight_publico": "string"
 }
 
 Datos campañas:
@@ -278,35 +311,35 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
       analisis_publico_por_campaña: publicoPorCampaña
     };
 
-  } catch {
+  } catch (error) {
     return {
       score: scoreBase,
-      resumen_ejecutivo: "Diagnóstico automático.",
+      diagnostico_general: "Diagnóstico automático.",
       urgencia: "ESTABLE",
       plan_accion: [],
       recomendacion_final: "",
       analisis_campañas: [],
+      insight_publico: "",
       analisis_publico_por_campaña: publicoPorCampaña
     };
   }
 }
 
 //////////////////////////////////////////////////////////
-// ENDPOINT REPORTADS
+// ENDPOINT
 //////////////////////////////////////////////////////////
 
-app.post("/reporte", async (req, res) => {
+app.post("/analizar", async (req, res) => {
   try {
     const currency = req.body.currency || "ARS";
     const resultado = await analizarConIA(req.body, currency);
     res.json(resultado);
-  } catch {
+  } catch (err) {
     res.status(500).json({ error: "Error interno" });
   }
 });
 
-const PORT = process.env.PORT || 10000;
-
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
-  console.log("🚀 ReportAds Global activo en puerto " + PORT)
+  console.log("🚀 ReportAds activo en puerto " + PORT)
 );
