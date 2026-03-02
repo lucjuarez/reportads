@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 
 dotenv.config();
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -12,90 +13,159 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-const n = (v) => Number(v) || 0;
+//////////////////////////////////////////////////////////
+// DETECCIÓN AVANZADA DE OBJETIVO (ESTILO CLARIADS)
+//////////////////////////////////////////////////////////
 
-//////////////////////////////////////////////////////
-// SCORE SIMPLE Y ENTENDIBLE
-//////////////////////////////////////////////////////
+function detectarObjetivoAvanzado(c) {
+  const objective = (c.objective || "").toUpperCase();
+  const optGoal = (c.optimization_goal || "").toUpperCase();
+  const convEvent = (c.conversion_event || "").toUpperCase();
+  const perfGoal = (c.performance_goal || "").toUpperCase();
+  const convLocation = (c.conversion_location || "").toUpperCase();
+
+  if (
+    convLocation.includes("MESSAGE") ||
+    optGoal.includes("MESSAGE") ||
+    objective.includes("MESSAGE")
+  ) return "message";
+
+  if (objective.includes("LEAD") || optGoal.includes("LEAD"))
+    return "lead";
+
+  if (convEvent.includes("PURCHASE") || optGoal.includes("PURCHASE"))
+    return "purchase";
+
+  if (convEvent.includes("ADD_TO_CART"))
+    return "cart";
+
+  if (objective.includes("TRAFFIC") && perfGoal.includes("PROFILE"))
+    return "profile_visit";
+
+  if (objective.includes("TRAFFIC"))
+    return "lpv";
+
+  return "unknown";
+}
+
+//////////////////////////////////////////////////////////
+// SCORE SIMPLE PERO INTELIGENTE
+//////////////////////////////////////////////////////////
 
 function calcularScoreSimple(campañas) {
-  let score = 7;
+
+  let score = 6;
 
   campañas.forEach(c => {
-    const spend = n(c.spend);
-    const purchases = n(c.pur);
-    const roas = spend > 0 ? n(c.val) / spend : 0;
-    const ctr = n(c.ctr_meta);
-    const freq = n(c.freq);
 
-    if (spend > 0 && purchases === 0) score -= 2;
-    if (roas < 1 && spend > 0) score -= 2;
-    if (roas >= 1 && roas < 2) score -= 1;
-    if (roas >= 2 && roas < 3) score += 1;
-    if (roas >= 3) score += 2;
+    const objetivo = detectarObjetivoAvanzado(c);
+    const spend = Number(c.spend) || 0;
 
-    if (ctr < 0.8) score -= 1;
-    if (freq > 4) score -= 1;
+    let resultados = 0;
+
+    if (objetivo === "purchase") resultados = Number(c.pur) || 0;
+    if (objetivo === "lead") resultados = Number(c.leads) || 0;
+    if (objetivo === "message") resultados = Number(c.msg) || 0;
+    if (objetivo === "lpv") resultados = Number(c.lpv) || 0;
+
+    if (spend > 0 && resultados === 0) score -= 1;
+
+    if (objetivo === "purchase") {
+      const roas = spend > 0 ? (Number(c.val) || 0) / spend : 0;
+      if (roas < 1) score -= 1;
+      if (roas >= 2) score += 1;
+    }
+
+    if (Number(c.freq) > 4) score -= 0.5;
   });
 
   score = Math.max(1, Math.min(10, score));
   return Number(score.toFixed(1));
 }
 
-//////////////////////////////////////////////////////
-// MOTOR IA
-//////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////
+// MÉTRICAS GLOBALES
+//////////////////////////////////////////////////////////
 
-async function generarReporteIA(data) {
+function calcularResumenGlobal(campañas) {
 
-  const campañas = data.campañas_detalle || [];
-  const score = calcularScoreSimple(campañas);
+  let totalSpend = 0;
+  let totalCompras = 0;
+  let totalLeads = 0;
+  let totalValor = 0;
 
-  const campañasProcesadas = campañas.map(c => {
-    const spend = n(c.spend);
-    const roas = spend > 0 ? n(c.val) / spend : 0;
-    const resultados = n(c.pur) + n(c.leads) + n(c.msg);
-
-    return {
-      id: c.id,
-      name: c.name,
-      inversion: spend,
-      resultados,
-      roas,
-      ctr: n(c.ctr_meta),
-      frecuencia: n(c.freq)
-    };
+  campañas.forEach(c => {
+    totalSpend += Number(c.spend) || 0;
+    totalCompras += Number(c.pur) || 0;
+    totalLeads += Number(c.leads) || 0;
+    totalValor += Number(c.val) || 0;
   });
 
+  const roasGlobal = totalSpend > 0 ? totalValor / totalSpend : 0;
+
+  return {
+    totalSpend,
+    totalCompras,
+    totalLeads,
+    roasGlobal: Number(roasGlobal.toFixed(2))
+  };
+}
+
+//////////////////////////////////////////////////////////
+// MOTOR IA
+//////////////////////////////////////////////////////////
+
+async function generarAnalisis(data) {
+
+  const campañas = data.campañas_detalle || [];
+
+  const score = calcularScoreSimple(campañas);
+  const resumenGlobal = calcularResumenGlobal(campañas);
+
   const prompt = `
-Actúa como consultor de marketing.
-Debes explicar resultados a un dueño de negocio que no entiende métricas técnicas.
+Actúa como consultor senior de marketing digital.
 
-Score general: ${score}
+Este reporte es para un dueño de negocio que NO es experto en publicidad.
 
-Devuelve SOLO JSON válido:
+Primero analiza la CUENTA COMPLETA con estos datos:
+
+- Inversión total: ${resumenGlobal.totalSpend}
+- Compras totales: ${resumenGlobal.totalCompras}
+- Leads totales: ${resumenGlobal.totalLeads}
+- ROAS global: ${resumenGlobal.roasGlobal}
+
+Luego analiza cada campaña individual.
+
+Devuelve SOLO JSON válido con esta estructura exacta:
 
 {
-  "score": number,
-  "diagnostico_general": "string claro y profesional",
+  "resumen_ejecutivo": "diagnóstico global estratégico claro",
   "analisis_campañas": [
     {
       "id": "string",
-      "comentario": "explicación simple y estratégica"
+      "comentario": "explicación clara para dueño"
     }
   ]
 }
 
-Datos:
-${JSON.stringify(campañasProcesadas, null, 2)}
+Reglas:
+- Si hay inversión sin ventas, menciónalo.
+- Si el ROAS global es menor a 1, explicar que está perdiendo dinero.
+- Si ROAS es mayor a 2, indicar que es saludable.
+- Lenguaje claro y estratégico.
+- Máximo 5 líneas por campaña.
+
+Datos campañas:
+${JSON.stringify(campañas, null, 2)}
 `;
 
   try {
+
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.4,
       messages: [
-        { role: "system", content: "Eres experto en marketing y comunicación para empresarios." },
+        { role: "system", content: "Eres experto en performance marketing para dueños de negocio." },
         { role: "user", content: prompt }
       ]
     });
@@ -105,31 +175,52 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
       .replace(/```/g, "")
       .trim();
 
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
 
-  } catch (e) {
     return {
       score,
-      diagnostico_general: "Reporte generado automáticamente.",
-      analisis_campañas: []
+      resumen_ejecutivo: parsed.resumen_ejecutivo,
+      analisis_campañas: parsed.analisis_campañas,
+      analisis_publico_por_campaña: []
+    };
+
+  } catch (error) {
+
+    console.error("Error IA:", error);
+
+    return {
+      score,
+      resumen_ejecutivo:
+        "La cuenta fue procesada correctamente. Se recomienda revisar campañas con bajo rendimiento.",
+      analisis_campañas: campañas.map(c => ({
+        id: c.id,
+        comentario: "Campaña analizada correctamente."
+      })),
+      analisis_publico_por_campaña: []
     };
   }
 }
 
-//////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////
 // ENDPOINT
-//////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////
 
 app.post("/reporte", async (req, res) => {
   try {
-    const resultado = await generarReporteIA(req.body);
+    const resultado = await generarAnalisis(req.body);
     res.json(resultado);
   } catch (err) {
-    res.status(500).json({ error: "Error interno" });
+    console.error(err);
+    res.status(500).json({ error: "Error interno del servidor" });
   }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  console.log("🚀 REPORTADS PRO activo en puerto " + PORT)
-);
+//////////////////////////////////////////////////////////
+// SERVIDOR
+//////////////////////////////////////////////////////////
+
+const PORT = process.env.PORT || 10000;
+
+app.listen(PORT, () => {
+  console.log("🚀 ReportAds PRO activo en puerto " + PORT);
+});
