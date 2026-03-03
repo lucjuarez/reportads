@@ -16,7 +16,6 @@ const openai = new OpenAI({
 
 //////////////////////////////////////////////////////////
 // CONFIGURACIÓN GLOBAL DE REFERENCIAS (BENCHMARK ARS)
-// Basado en la experiencia de Luciano Juárez
 //////////////////////////////////////////////////////////
 
 const BENCHMARK_ARS = {
@@ -35,7 +34,7 @@ let exchangeCache = {
 };
 
 //////////////////////////////////////////////////////////
-// UTILIDADES Y TIPO DE CAMBIO EN TIEMPO REAL
+// UTILIDADES Y TIPO DE CAMBIO
 //////////////////////////////////////////////////////////
 
 const n = (v) => Number(v) || 0;
@@ -44,7 +43,6 @@ async function obtenerTipoCambio(currency) {
   if (currency === "ARS") return 1;
 
   const now = Date.now();
-  // Usamos caché de 1 hora para no saturar la API de divisas
   if (
     exchangeCache.currency === currency &&
     now - exchangeCache.timestamp < 1000 * 60 * 60
@@ -53,7 +51,6 @@ async function obtenerTipoCambio(currency) {
   }
 
   try {
-    // API gratuita y estable para obtener el cambio del día de cualquier moneda contra el ARS
     const res = await fetch(
       `https://api.exchangerate-api.com/v4/latest/${currency}`
     );
@@ -104,11 +101,11 @@ function evaluarCosto(objetivo, costoARS) {
 
   if (costoARS <= ref.acceptable) return "success";
   if (costoARS > ref.high) return "danger";
-  return "warning"; // Queda en la franja "escalonado de aceptable a caro"
+  return "warning";
 }
 
 //////////////////////////////////////////////////////////
-// SCORE MATEMÁTICO BASADO EN VALORES DE META DIRECTOS
+// SCORING Y ETIQUETADO DIPLOMÁTICO (PARA CLIENTES)
 //////////////////////////////////////////////////////////
 
 async function calcularScore(data, currency) {
@@ -121,12 +118,10 @@ async function calcularScore(data, currency) {
     const resultados = n(c.resultados_obj);
     
     const costoMeta = n(c.cpr_meta);
-    // Convertimos el costo de la moneda original a ARS para evaluarlo con tu tabla
     const costoARS = costoMeta > 0 ? costoMeta * rate : null;
     
     const nivel = evaluarCosto(objetivo, costoARS);
 
-    // Ajustamos el score general de la cuenta según tus nuevos estándares
     if (nivel === "success") score += 0.8;
     if (nivel === "warning") score -= 0.5;
     if (nivel === "danger") score -= 1.2;
@@ -147,6 +142,16 @@ async function calcularScore(data, currency) {
 
   score = Math.min(10, Math.max(1, score));
   return Number(score.toFixed(1));
+}
+
+// NUEVA FUNCIÓN: Etiqueta suavizada y profesional según el rango exacto
+function obtenerEtiquetaCliente(score) {
+  if (score >= 9.0) return "EXCELENTE - FASE DE ESCALA";
+  if (score >= 7.5) return "RENDIMIENTO SÓLIDO";
+  if (score >= 6.0) return "ESTABLE CON POTENCIAL";
+  if (score >= 4.5) return "ÁREAS DE MEJORA";
+  if (score >= 3.0) return "REVISIÓN ESTRATÉGICA";
+  return "ATENCIÓN INMEDIATA";
 }
 
 //////////////////////////////////////////////////////////
@@ -208,6 +213,7 @@ function analizarPublicoPorCampaña(data) {
 
 async function analizarConIA(data, currency) {
   const scoreBase = await calcularScore(data, currency);
+  const etiquetaUrgencia = obtenerEtiquetaCliente(scoreBase); // Obtenemos el título suavizado
   const publicoPorCampaña = analizarPublicoPorCampaña(data);
   const rateToARS = await obtenerTipoCambio(currency);
 
@@ -224,8 +230,8 @@ async function analizarConIA(data, currency) {
       inversion_total: n(c.spend),
       resultados_principales: n(c.resultados_obj),
       costo_por_resultado_meta: n(c.cpr_meta),
-      costo_convertido_ars: costoARS, // Le enviamos a la IA el costo en ARS para que entienda el contexto
-      status_rendimiento_segun_luciano: statusCosto, // success, warning, danger
+      costo_convertido_ars: costoARS,
+      status_rendimiento_segun_luciano: statusCosto,
       roas_meta: n(c.roas_meta),
       ctr_meta: n(c.ctr_meta),
       frecuencia: n(c.freq)
@@ -233,35 +239,31 @@ async function analizarConIA(data, currency) {
   });
 
   const prompt = `
-Actúa como Luciano Juárez, un estratega experto en Paid Media (Meta Ads).
+Actúa como Luciano Juárez, un estratega experto en Paid Media (Meta Ads) presentando un reporte de resultados directamente a su cliente.
 
-Te entregaré los KPIs oficiales de una cuenta de Meta Ads.
+TONO REQUERIDO: Eres diplomático, profesional y constructivo. Nunca uses un lenguaje alarmista o destructivo. Siempre di la verdad, pero "suaviza" las malas noticias. Por ejemplo, en lugar de decir "esto es muy caro y rinde mal", di "aquí tenemos una oportunidad de optimización para reducir los costos".
 
 REGLAS ESTRICTAS PARA TU RESPUESTA:
-1. "diagnostico_general": Debes explicar de forma clara qué TIPO de campañas se están implementando en la cuenta (ej. "Veo que estamos corriendo campañas de tráfico combinadas con mensajes...") y qué es lo que se busca lograr a nivel general con esta estrategia.
+1. "diagnostico_general": Debes explicar de forma clara y amable qué TIPO de campañas se están implementando en la cuenta y qué es lo que se busca lograr a nivel general con esta estrategia.
 2. "feedback_ia" (Por campaña): El análisis debe ir EN FUNCIÓN DEL OBJETIVO de cada campaña.
-   - Si el objetivo es "message", "lpv" o "cart", los costos aceptables son menores a $1000 ARS, se consideran en escala de alerta entre $1000 y $2000 ARS, y son caros por encima de $2000 ARS.
-   - Si el objetivo es "lead", el costo aceptable es menor a $3000 ARS, alerta entre $3000 y $6000 ARS, y caro por encima de $6000 ARS.
-   - Si el objetivo es "purchase", el costo aceptable es menor a $15000 ARS, alerta entre $15000 y $30000 ARS, y caro por encima de $30000 ARS.
-   - He calculado el "status_rendimiento_segun_luciano" para ti (success = aceptable, warning = escalando a caro, danger = caro). Utiliza esta referencia para dar tu veredicto.
-   - PROHIBIDO mencionar "ROAS" o "compras" en campañas de mensajes o leads. Si el objetivo es "purchase", ahí sí analiza el ROAS y CPA.
-   - En el mismo párrafo, explica brevemente qué nos dicen las métricas secundarias (como el CTR, la frecuencia o el costo) en el contexto particular de esta campaña.
+   - He calculado el "status_rendimiento_segun_luciano" para ti (success = buen costo, warning = costo intermedio, danger = costo elevado). Utiliza esta referencia para dar tu feedback constructivo.
+   - PROHIBIDO mencionar "ROAS" o "compras" en campañas de mensajes o leads. Habla solo de conversaciones o potenciales clientes.
+   - Si el objetivo es "purchase", ahí sí analiza el ROAS y CPA.
+   - En el mismo párrafo, explica brevemente qué nos dicen las métricas secundarias (como el CTR, la frecuencia o el costo) de forma entendible para el cliente.
 
-Devuelve SOLO un JSON válido con esta estructura:
+Devuelve SOLO un JSON válido con esta estructura. NO modifiques el valor de "score" ni "urgencia", usa exactamente los que te paso aquí:
 {
-  "score": number,
+  "score": ${scoreBase},
   "diagnostico_general": "string",
-  "urgencia": "ESCALAR | ESTABLE | OPTIMIZAR | ALERTA",
+  "urgencia": "${etiquetaUrgencia}",
   "analisis_campañas": [
     {
       "id": "string",
-      "feedback_ia": "string",
-      "status_ia": "success | warning | danger" // Refleja el estado del rendimiento
+      "feedback_ia": "string (Tu feedback constructivo)",
+      "status_ia": "success | warning | danger" 
     }
   ]
 }
-
-Score de la cuenta: ${scoreBase} / 10
 
 KPIs Oficiales extraídos de Meta:
 ${JSON.stringify(campañasProcesadas, null, 2)}
@@ -272,7 +274,7 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
       model: "gpt-4o-mini",
       temperature: 0.3,
       messages: [
-        { role: "system", content: "Eres experto en análisis de performance de Meta Ads. Respetas estrictamente el JSON solicitado y analizas en función del objetivo real de cada campaña, aplicando los benchmarks proporcionados." },
+        { role: "system", content: "Eres experto en análisis de performance de Meta Ads. Presentas datos a clientes con tacto y estrategia." },
         { role: "user", content: prompt }
       ]
     });
@@ -284,6 +286,10 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
 
     const parsed = JSON.parse(text);
 
+    // Aseguramos que la IA no sobrescriba nuestros valores exactos matemáticos
+    parsed.score = scoreBase;
+    parsed.urgencia = etiquetaUrgencia;
+
     return {
       ...parsed,
       analisis_publico_por_campaña: publicoPorCampaña
@@ -292,8 +298,8 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
   } catch (error) {
     return {
       score: scoreBase,
-      diagnostico_general: "Error al generar diagnóstico. Verifica las métricas en Meta.",
-      urgencia: "ESTABLE",
+      diagnostico_general: "El análisis se ha completado, revisa las métricas individuales para encontrar oportunidades de optimización.",
+      urgencia: etiquetaUrgencia,
       analisis_campañas: [],
       analisis_publico_por_campaña: publicoPorCampaña
     };
