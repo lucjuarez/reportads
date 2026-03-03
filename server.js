@@ -89,15 +89,15 @@ function calcularScoreIndividual(c, rate) {
     scoreCreativo = Math.min(10, 7 + ((ctr - 2.0) * 1.5)); 
   }
 
-  // 3. SATURACIÓN (Frecuencia) - 15% del peso (ESCALA ESTRICTA LUCIANO)
+  // 3. SATURACIÓN (Frecuencia) - 15% del peso (ESCALA ESTRICTA)
   let scoreSaturacion = 10;
   const freq = n(c.freq);
   if (freq <= 1.5) {
-    scoreSaturacion = 10 - ((freq - 1.0) * 4); // 1 a 1.5 (Muy bien)
+    scoreSaturacion = 10 - ((freq - 1.0) * 4); 
   } else if (freq < 2.0) {
-    scoreSaturacion = 8 - ((freq - 1.5) * 4); // 1.5 a 1.99 (Aceptable)
+    scoreSaturacion = 8 - ((freq - 1.5) * 4); 
   } else {
-    scoreSaturacion = Math.max(1, 4 - ((freq - 2.0) * 4)); // > 2.0 (Alerta)
+    scoreSaturacion = Math.max(1, 4 - ((freq - 2.0) * 4)); 
   }
 
   // 4. SUBASTA (CPC) - 10% del peso
@@ -142,7 +142,7 @@ function obtenerEtiqueta(score) {
   return "REVISIÓN URGENTE";
 }
 
-// FUNCIÓN OPTIMIZADA DE PÚBLICO (Ahorro de tokens)
+// FUNCIÓN OPTIMIZADA DE PÚBLICO
 function analizarPublicoPorCampaña(data) {
   const campañas = data.campañas_detalle || [];
   return campañas.map(c => {
@@ -175,7 +175,7 @@ function analizarPublicoPorCampaña(data) {
   });
 }
 
-// MOTOR DE INTELIGENCIA ARTIFICIAL (Prompt Blindado)
+// MOTOR DE INTELIGENCIA ARTIFICIAL (CLIENT-FACING)
 async function analizarConIA(data, currency) {
   const rate = await obtenerTipoCambio(currency);
   
@@ -195,30 +195,29 @@ async function analizarConIA(data, currency) {
 
   const publicoProcesado = analizarPublicoPorCampaña(data);
 
-  const prompt = `Actúa como Luciano Juárez, estratega senior de Paid Media. Reporte profesional.
+  const prompt = `Actúa como Luciano Juárez, estratega senior de Paid Media. ESTE REPORTE SERÁ LEÍDO POR EL CLIENTE FINAL (el dueño del negocio).
   
   Score General de la cuenta: ${scoreGeneral} (${etiquetaGeneral}).
   
   REGLAS DE ANÁLISIS:
-  1. No uses frases genéricas.
-  2. Justifica cada score individual considerando: Rentabilidad, CTR, Frecuencia, Conversión y CPC.
+  1. TONO CLIENT-FACING: Usa un tono ejecutivo, diplomático, constructivo y enfocado en el negocio. Habla de "oportunidades de optimización" en lugar de "errores" o "desastres". 
+  2. DIAGNÓSTICO GENERAL (VISIÓN DE DIRECTOR): Esta sección debe dar una visión macro. Analiza el mix de objetivos utilizados, cómo se está distribuyendo la inversión y recomienda una estrategia global para el negocio. ESTÁ PROHIBIDO repetir métricas individuales de campañas aquí.
   3. REGLA ESTRICTA DE FRECUENCIA: 
-     - De 1.0 a 1.5 es "Normal / Ideal".
-     - De 1.51 a 1.99 es "Aceptable".
-     - De 2.0 en adelante es "ALERTA / SATURACIÓN" (fatiga de anuncios). 
-     NUNCA digas que una frecuencia de 2.0 o superior es "adecuada". Debes marcarla como crítica o elevada.
-  4. CTR: < 1% es Alarma. 1% a 2% es Normal. > 2% es Excelente.
-  5. Revisa "AUDIENCIAS_PRECALCULADAS" para dar consejos de segmentación basados en la demografía ganadora.
-  6. REGLA ESTRICTA DE OBJETIVOS: Si la campaña es de "Mensajes" (message), está ESTRICTAMENTE PROHIBIDO mencionar, exigir o criticar la falta de "leads", "compras", "conversiones directas" o "ROAS". Evalúa su éxito ÚNICAMENTE en base a su capacidad de generar Mensajes a buen costo, su CTR y su Frecuencia.
+     - 1.0 a 1.5: "Normal / Ideal".
+     - 1.51 a 1.99: "Aceptable".
+     - >= 2.0: "Saturación / Fatiga". Menciónalo como una oportunidad para renovar creativos, pero nunca digas que es "adecuada".
+  4. CTR: < 1% (Requiere mejora), 1% a 2% (Promedio sano), > 2% (Excelente retención).
+  5. Revisa "AUDIENCIAS_PRECALCULADAS" para sugerir en qué público enfocarse de manera amable.
+  6. REGLA ESTRICTA DE OBJETIVOS: Si la campaña es de "Mensajes" (message), está ESTRICTAMENTE PROHIBIDO mencionar, exigir o criticar la falta de "leads" o "compras". Evalúa su éxito ÚNICAMENTE por los Mensajes, CTR y Frecuencia.
 
   Formato de salida JSON estricto:
   {
-    "diagnostico_general": "Resumen estratégico profundo del mix de campañas...",
+    "diagnostico_general": "Visión macro del negocio. Análisis del mix de objetivos, distribución del presupuesto y recomendación global estratégica. Tono ejecutivo.",
     "urgencia": "${etiquetaGeneral}",
     "analisis_campañas": [
       {
         "id": "ID",
-        "feedback_ia": "Análisis táctico profundo justificando nota. Aplica las reglas estrictas de frecuencia, CTR y congruencia de objetivos...",
+        "feedback_ia": "Análisis táctico profesional. Aplica las reglas estrictas y orienta al cliente sobre los próximos pasos...",
         "status_ia": "success | warning | danger"
       }
     ]
@@ -231,7 +230,7 @@ async function analizarConIA(data, currency) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.4,
-      messages: [{ role: "system", content: "Eres Luciano Juárez, analista experto en Meta Ads. Eres estricto con la lectura de métricas y objetivos." }, { role: "user", content: prompt }],
+      messages: [{ role: "system", content: "Eres Luciano Juárez, consultor en Meta Ads. Hablas con diplomacia ejecutiva y visión de negocios." }, { role: "user", content: prompt }],
       response_format: { type: "json_object" }
     });
 
