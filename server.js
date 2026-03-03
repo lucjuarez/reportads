@@ -117,7 +117,6 @@ async function calcularScore(data, currency) {
     const objetivo = detectarObjetivo(c);
     const resultados = n(c.resultados_obj);
     
-    // Leemos el costo directamente de Meta
     const costoMeta = n(c.cpr_meta);
     const costoARS = costoMeta > 0 ? costoMeta * rate : null;
     
@@ -135,7 +134,7 @@ async function calcularScore(data, currency) {
     if (freq > 4.5) score -= 1.2;
 
     if (objetivo === "purchase" && spend > 0) {
-      const roas = n(c.roas_meta); // ROAS Directo de Meta
+      const roas = n(c.roas_meta); 
       if (roas > 0 && roas < 1) score -= 1;
       if (roas >= 2) score += 0.5;
     }
@@ -206,7 +205,6 @@ async function analizarConIA(data, currency) {
   const scoreBase = await calcularScore(data, currency);
   const publicoPorCampaña = analizarPublicoPorCampaña(data);
 
-  // Le pasamos a la IA los números crudos reportados por Meta
   const campañasProcesadas = (data.campañas_detalle || []).map(c => {
     return {
       id: c.id,
@@ -224,25 +222,30 @@ async function analizarConIA(data, currency) {
   const prompt = `
 Actúa como Luciano Juárez, un estratega experto en Paid Media (Meta Ads).
 
-Te entregaré los KPIs directos y oficiales extraídos de la API de Facebook Ads. Tu tarea NO es calcular métricas matemáticas, sino leer estos datos y brindar un análisis profundo, estratégico y accionable sobre su rendimiento.
+Te entregaré los KPIs oficiales de una cuenta de Meta Ads.
 
-Score de la cuenta: ${scoreBase} / 10
+REGLAS ESTRICTAS PARA TU RESPUESTA:
+1. "diagnostico_general": Debes explicar de forma clara qué TIPO de campañas se están implementando en la cuenta (ej. "Veo que estamos corriendo campañas de tráfico combinadas con mensajes...") y qué es lo que se busca lograr a nivel general con esta estrategia.
+2. "feedback_ia" (Por campaña): El análisis debe ir EN FUNCIÓN DEL OBJETIVO de cada campaña.
+   - Si el objetivo es "message" o "lead", HABLA EXCLUSIVAMENTE del volumen y costo por mensaje/lead. PROHIBIDO mencionar "ROAS" o "compras" en estas campañas.
+   - Si el objetivo es "purchase", ahí sí analiza el ROAS y CPA.
+   - En el mismo párrafo, explica brevemente qué nos dicen las métricas secundarias (como el CTR, la frecuencia o el CPC) en el contexto particular de esta campaña (Ej: "El CTR de 1.5% indica que el anuncio llama la atención, aunque la frecuencia de 4 sugiere que el público ya lo vio varias veces").
 
 Devuelve SOLO un JSON válido con esta estructura:
 {
   "score": number,
-  "diagnostico_general": "string (Análisis general del rendimiento basado en la inversión, costos oficiales y resultados)",
+  "diagnostico_general": "string",
   "urgencia": "ESCALAR | ESTABLE | OPTIMIZAR | ALERTA",
-  "plan_accion": ["string (Pasos tácticos)"],
-  "recomendacion_final": "string (Tu veredicto estratégico definitivo)",
   "analisis_campañas": [
     {
       "id": "string",
-      "feedback_ia": "string (Tu lectura de los costos y rendimiento oficiales reportados por Meta. ¿Es rentable? ¿Hay fatiga?)",
+      "feedback_ia": "string",
       "status_ia": "success | warning | danger"
     }
   ]
 }
+
+Score de la cuenta: ${scoreBase} / 10
 
 KPIs Oficiales extraídos de Meta:
 ${JSON.stringify(campañasProcesadas, null, 2)}
@@ -253,7 +256,7 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
       model: "gpt-4o-mini",
       temperature: 0.3,
       messages: [
-        { role: "system", content: "Eres experto en análisis de performance de Meta Ads." },
+        { role: "system", content: "Eres experto en análisis de performance de Meta Ads. Respetas estrictamente el JSON solicitado y analizas en función del objetivo real de cada campaña." },
         { role: "user", content: prompt }
       ]
     });
@@ -275,8 +278,6 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
       score: scoreBase,
       diagnostico_general: "Error al generar diagnóstico. Verifica las métricas en Meta.",
       urgencia: "ESTABLE",
-      plan_accion: [],
-      recomendacion_final: "Las métricas se extrajeron de Meta, pero la IA no pudo procesar el análisis.",
       analisis_campañas: [],
       analisis_publico_por_campaña: publicoPorCampaña
     };
