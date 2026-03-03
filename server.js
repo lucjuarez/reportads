@@ -8,13 +8,14 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Aumentamos el límite para procesar los desgloses de audiencia sin errores
+app.use(express.json({ limit: '50mb' }));
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// BENCHMARKS ARS ACTUALIZADOS
+// BENCHMARKS ARS ACTUALIZADOS (Tu configuración original)
 const BENCHMARK_ARS = {
   message: { acceptable: 1000, high: 2000 },
   lead: { acceptable: 3000, high: 6000 },
@@ -93,7 +94,9 @@ async function analizarConIA(data, currency) {
       freq: n(c.freq),
       cpc: n(c.cpc_meta),
       score_individual: individualScore,
-      etiqueta_individual: obtenerEtiqueta(individualScore)
+      etiqueta_individual: obtenerEtiqueta(individualScore),
+      // Mantenemos los breakdowns para que la IA los analice
+      breakdowns: c.breakdowns || [] 
     };
   });
 
@@ -105,21 +108,30 @@ async function analizarConIA(data, currency) {
   Score General de la cuenta: ${scoreGeneral} (${etiquetaGeneral}).
   
   REGLAS DE ANÁLISIS POR CAMPAÑA:
-  1. No uses frases genéricas como "Analizado correctamente".
-  2. Para cada campaña, justifica su score individual (${JSON.stringify(campañasProcesadas.map(cp => ({id: cp.id, score: cp.score_individual})))}).
-  3. Analiza las métricas secundarias (CTR, Frecuencia, CPC) para explicar por qué el rendimiento es ese.
-  4. Si el score es bajo, sugiere optimizaciones tácticas (cambio de creativos, ajuste de segmentación, etc.) sin ser alarmista.
+  1. No uses frases genéricas.
+  2. Justifica el score individual de cada campaña.
+  3. Analiza las métricas secundarias (CTR, Frecuencia, CPC).
+  4. IMPORTANTE: Analiza los datos en 'breakdowns' (Edad, Género, Ubicación) para dar recomendaciones de segmentación.
   5. PROHIBIDO mencionar ROAS en campañas de mensajes o leads.
 
   Formato de salida JSON estricto:
   {
-    "diagnostico_general": "Análisis profundo del mix de campañas y cumplimiento de objetivos generales...",
+    "diagnostico_general": "Análisis profundo...",
     "urgencia": "${etiquetaGeneral}",
     "analisis_campañas": [
       {
         "id": "ID_DE_CAMPAÑA",
-        "feedback_ia": "Análisis detallado de 2 o 3 párrafos sobre el rendimiento, métricas secundarias y sugerencias...",
+        "feedback_ia": "Análisis de 2-3 párrafos incluyendo insights de audiencia (edad/género/ubicación)...",
         "status_ia": "success | warning | danger"
+      }
+    ],
+    "analisis_publico_por_campaña": [
+      {
+        "id": "ID_DE_CAMPAÑA",
+        "mejor_segmento_edad": "rango",
+        "mejor_genero": "genero",
+        "top_3_paises": [],
+        "top_3_ciudades_por_pais": {}
       }
     ]
   }
@@ -130,7 +142,10 @@ async function analizarConIA(data, currency) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.4,
-      messages: [{ role: "system", content: "Eres Luciano Juárez, un analista de Meta Ads experto y diplomático." }, { role: "user", content: prompt }]
+      messages: [
+        { role: "system", content: "Eres Luciano Juárez, un analista de Meta Ads experto y diplomático." },
+        { role: "user", content: prompt }
+      ]
     });
 
     const parsed = JSON.parse(response.choices[0].message.content.replace(/```json/g, "").replace(/```/g, ""));
@@ -141,8 +156,12 @@ async function analizarConIA(data, currency) {
 }
 
 app.post("/analizar", async (req, res) => {
-  const resIA = await analizarConIA(req.body, req.body.currency);
-  res.json(resIA);
+  try {
+    const resIA = await analizarConIA(req.body, req.body.currency);
+    res.json(resIA);
+  } catch (error) {
+    res.status(500).json({ error: "Error interno" });
+  }
 });
 
 app.listen(process.env.PORT || 3000);
