@@ -15,16 +15,17 @@ const openai = new OpenAI({
 });
 
 //////////////////////////////////////////////////////////
-// CONFIGURACIÓN GLOBAL DE REFERENCIAS (BENCHMARK)
+// CONFIGURACIÓN GLOBAL DE REFERENCIAS (BENCHMARK ARS)
+// Basado en la experiencia de Luciano Juárez
 //////////////////////////////////////////////////////////
 
 const BENCHMARK_ARS = {
   message: { acceptable: 1000, high: 2000 },
-  lead: { acceptable: 15000, high: 30000 },
-  purchase: { acceptable: 20000, high: 40000 },
-  cart: { acceptable: 8000, high: 15000 },
-  profile_visit: { acceptable: 500, high: 1200 },
-  lpv: { acceptable: 500, high: 1200 }
+  lead: { acceptable: 3000, high: 6000 },
+  purchase: { acceptable: 15000, high: 30000 },
+  cart: { acceptable: 1000, high: 2000 },
+  profile_visit: { acceptable: 1000, high: 2000 },
+  lpv: { acceptable: 1000, high: 2000 }
 };
 
 let exchangeCache = {
@@ -34,7 +35,7 @@ let exchangeCache = {
 };
 
 //////////////////////////////////////////////////////////
-// UTILIDADES
+// UTILIDADES Y TIPO DE CAMBIO EN TIEMPO REAL
 //////////////////////////////////////////////////////////
 
 const n = (v) => Number(v) || 0;
@@ -43,6 +44,7 @@ async function obtenerTipoCambio(currency) {
   if (currency === "ARS") return 1;
 
   const now = Date.now();
+  // Usamos caché de 1 hora para no saturar la API de divisas
   if (
     exchangeCache.currency === currency &&
     now - exchangeCache.timestamp < 1000 * 60 * 60
@@ -51,8 +53,9 @@ async function obtenerTipoCambio(currency) {
   }
 
   try {
+    // API gratuita y estable para obtener el cambio del día de cualquier moneda contra el ARS
     const res = await fetch(
-      `https://api.exchangerate.host/latest?base=${currency}&symbols=ARS`
+      `https://api.exchangerate-api.com/v4/latest/${currency}`
     );
     const data = await res.json();
     const rate = data?.rates?.ARS || 1;
@@ -60,7 +63,7 @@ async function obtenerTipoCambio(currency) {
     exchangeCache = { rate, currency, timestamp: now };
     return rate;
   } catch (e) {
-    console.log("Error tipo de cambio, usando 1");
+    console.log("Error obteniendo tipo de cambio, usando 1 por defecto.");
     return 1;
   }
 }
@@ -101,7 +104,7 @@ function evaluarCosto(objetivo, costoARS) {
 
   if (costoARS <= ref.acceptable) return "success";
   if (costoARS > ref.high) return "danger";
-  return "warning";
+  return "warning"; // Queda en la franja "escalonado de aceptable a caro"
 }
 
 //////////////////////////////////////////////////////////
@@ -118,10 +121,12 @@ async function calcularScore(data, currency) {
     const resultados = n(c.resultados_obj);
     
     const costoMeta = n(c.cpr_meta);
+    // Convertimos el costo de la moneda original a ARS para evaluarlo con tu tabla
     const costoARS = costoMeta > 0 ? costoMeta * rate : null;
     
     const nivel = evaluarCosto(objetivo, costoARS);
 
+    // Ajustamos el score general de la cuenta según tus nuevos estándares
     if (nivel === "success") score += 0.8;
     if (nivel === "warning") score -= 0.5;
     if (nivel === "danger") score -= 1.2;
@@ -204,15 +209,23 @@ function analizarPublicoPorCampaña(data) {
 async function analizarConIA(data, currency) {
   const scoreBase = await calcularScore(data, currency);
   const publicoPorCampaña = analizarPublicoPorCampaña(data);
+  const rateToARS = await obtenerTipoCambio(currency);
 
   const campañasProcesadas = (data.campañas_detalle || []).map(c => {
+    const costoMeta = n(c.cpr_meta);
+    const costoARS = costoMeta > 0 ? costoMeta * rateToARS : 0;
+    const objetivoDetectado = detectarObjetivo(c);
+    const statusCosto = evaluarCosto(objetivoDetectado, costoARS);
+
     return {
       id: c.id,
       nombre_campaña: c.name,
-      objetivo_detectado: detectarObjetivo(c),
+      objetivo_detectado: objetivoDetectado,
       inversion_total: n(c.spend),
       resultados_principales: n(c.resultados_obj),
       costo_por_resultado_meta: n(c.cpr_meta),
+      costo_convertido_ars: costoARS, // Le enviamos a la IA el costo en ARS para que entienda el contexto
+      status_rendimiento_segun_luciano: statusCosto, // success, warning, danger
       roas_meta: n(c.roas_meta),
       ctr_meta: n(c.ctr_meta),
       frecuencia: n(c.freq)
@@ -227,9 +240,12 @@ Te entregaré los KPIs oficiales de una cuenta de Meta Ads.
 REGLAS ESTRICTAS PARA TU RESPUESTA:
 1. "diagnostico_general": Debes explicar de forma clara qué TIPO de campañas se están implementando en la cuenta (ej. "Veo que estamos corriendo campañas de tráfico combinadas con mensajes...") y qué es lo que se busca lograr a nivel general con esta estrategia.
 2. "feedback_ia" (Por campaña): El análisis debe ir EN FUNCIÓN DEL OBJETIVO de cada campaña.
-   - Si el objetivo es "message" o "lead", HABLA EXCLUSIVAMENTE del volumen y costo por mensaje/lead. PROHIBIDO mencionar "ROAS" o "compras" en estas campañas.
-   - Si el objetivo es "purchase", ahí sí analiza el ROAS y CPA.
-   - En el mismo párrafo, explica brevemente qué nos dicen las métricas secundarias (como el CTR, la frecuencia o el CPC) en el contexto particular de esta campaña (Ej: "El CTR de 1.5% indica que el anuncio llama la atención, aunque la frecuencia de 4 sugiere que el público ya lo vio varias veces").
+   - Si el objetivo es "message", "lpv" o "cart", los costos aceptables son menores a $1000 ARS, se consideran en escala de alerta entre $1000 y $2000 ARS, y son caros por encima de $2000 ARS.
+   - Si el objetivo es "lead", el costo aceptable es menor a $3000 ARS, alerta entre $3000 y $6000 ARS, y caro por encima de $6000 ARS.
+   - Si el objetivo es "purchase", el costo aceptable es menor a $15000 ARS, alerta entre $15000 y $30000 ARS, y caro por encima de $30000 ARS.
+   - He calculado el "status_rendimiento_segun_luciano" para ti (success = aceptable, warning = escalando a caro, danger = caro). Utiliza esta referencia para dar tu veredicto.
+   - PROHIBIDO mencionar "ROAS" o "compras" en campañas de mensajes o leads. Si el objetivo es "purchase", ahí sí analiza el ROAS y CPA.
+   - En el mismo párrafo, explica brevemente qué nos dicen las métricas secundarias (como el CTR, la frecuencia o el costo) en el contexto particular de esta campaña.
 
 Devuelve SOLO un JSON válido con esta estructura:
 {
@@ -240,7 +256,7 @@ Devuelve SOLO un JSON válido con esta estructura:
     {
       "id": "string",
       "feedback_ia": "string",
-      "status_ia": "success | warning | danger"
+      "status_ia": "success | warning | danger" // Refleja el estado del rendimiento
     }
   ]
 }
@@ -256,7 +272,7 @@ ${JSON.stringify(campañasProcesadas, null, 2)}
       model: "gpt-4o-mini",
       temperature: 0.3,
       messages: [
-        { role: "system", content: "Eres experto en análisis de performance de Meta Ads. Respetas estrictamente el JSON solicitado y analizas en función del objetivo real de cada campaña." },
+        { role: "system", content: "Eres experto en análisis de performance de Meta Ads. Respetas estrictamente el JSON solicitado y analizas en función del objetivo real de cada campaña, aplicando los benchmarks proporcionados." },
         { role: "user", content: prompt }
       ]
     });
