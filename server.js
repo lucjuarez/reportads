@@ -14,6 +14,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
+// BENCHMARKS ARS ACTUALIZADOS
 const BENCHMARK_ARS = {
   message: { acceptable: 1000, high: 2000 },
   lead: { acceptable: 3000, high: 6000 },
@@ -50,16 +51,15 @@ function detectarObjetivo(c) {
   return "message";
 }
 
-// NUEVA FUNCIÓN: Calcula el score de UNA sola campaña
 function calcularScoreIndividual(c, rate) {
-  let s = 7.0; // Base diplomática
+  let s = 6.5; 
   const obj = detectarObjetivo(c);
   const costoARS = n(c.cpr_meta) * rate;
   const ref = BENCHMARK_ARS[obj];
 
   if (costoARS > 0 && ref) {
     if (costoARS <= ref.acceptable) s += 1.5;
-    else if (costoARS > ref.high) s -= 1.0;
+    else if (costoARS > ref.high) s -= 0.8;
     else s -= 0.3;
   }
   if (n(c.spend) > 500 * rate && n(c.resultados_obj) === 0) s -= 2.0;
@@ -83,8 +83,15 @@ async function analizarConIA(data, currency) {
   const campañasProcesadas = (data.campañas_detalle || []).map(c => {
     const individualScore = calcularScoreIndividual(c, rate);
     return {
-      ...c,
-      objetivo_detectado: detectarObjetivo(c),
+      id: c.id,
+      name: c.name,
+      objetivo: detectarObjetivo(c),
+      spend: n(c.spend),
+      resultados: n(c.resultados_obj),
+      cpr: n(c.cpr_meta),
+      ctr: n(c.ctr_meta),
+      freq: n(c.freq),
+      cpc: n(c.cpc_meta),
       score_individual: individualScore,
       etiqueta_individual: obtenerEtiqueta(individualScore)
     };
@@ -93,28 +100,43 @@ async function analizarConIA(data, currency) {
   const scoreGeneral = Number((campañasProcesadas.reduce((acc, curr) => acc + curr.score_individual, 0) / campañasProcesadas.length).toFixed(1));
   const etiquetaGeneral = obtenerEtiqueta(scoreGeneral);
 
-  const prompt = `Actúa como Luciano Juárez. Analiza estas campañas de Meta Ads. 
+  const prompt = `Actúa como Luciano Juárez, estratega senior de Paid Media. Presenta un reporte profesional y diplomático.
+  
   Score General de la cuenta: ${scoreGeneral} (${etiquetaGeneral}).
-  Presenta el Diagnóstico Estratégico de forma diplomática.
-  Para cada campaña, usa su score individual para dar un feedback coherente.
-  JSON format: { "diagnostico_general": "", "urgencia": "${etiquetaGeneral}", "analisis_campañas": [{ "id": "", "feedback_ia": "", "status_ia": "" }] }`;
+  
+  REGLAS DE ANÁLISIS POR CAMPAÑA:
+  1. No uses frases genéricas como "Analizado correctamente".
+  2. Para cada campaña, justifica su score individual (${JSON.stringify(campañasProcesadas.map(cp => ({id: cp.id, score: cp.score_individual})))}).
+  3. Analiza las métricas secundarias (CTR, Frecuencia, CPC) para explicar por qué el rendimiento es ese.
+  4. Si el score es bajo, sugiere optimizaciones tácticas (cambio de creativos, ajuste de segmentación, etc.) sin ser alarmista.
+  5. PROHIBIDO mencionar ROAS en campañas de mensajes o leads.
+
+  Formato de salida JSON estricto:
+  {
+    "diagnostico_general": "Análisis profundo del mix de campañas y cumplimiento de objetivos generales...",
+    "urgencia": "${etiquetaGeneral}",
+    "analisis_campañas": [
+      {
+        "id": "ID_DE_CAMPAÑA",
+        "feedback_ia": "Análisis detallado de 2 o 3 párrafos sobre el rendimiento, métricas secundarias y sugerencias...",
+        "status_ia": "success | warning | danger"
+      }
+    ]
+  }
+
+  DATOS: ${JSON.stringify(campañasProcesadas)}`;
 
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      temperature: 0.3,
-      messages: [{ role: "user", content: prompt + JSON.stringify(campañasProcesadas) }]
+      temperature: 0.4,
+      messages: [{ role: "system", content: "Eres Luciano Juárez, un analista de Meta Ads experto y diplomático." }, { role: "user", content: prompt }]
     });
+
     const parsed = JSON.parse(response.choices[0].message.content.replace(/```json/g, "").replace(/```/g, ""));
-    
-    // Inyectamos los scores calculados por el código para que la IA no los cambie
-    return {
-      ...parsed,
-      score: scoreGeneral,
-      campañas_con_score: campañasProcesadas 
-    };
+    return { ...parsed, score: scoreGeneral, campañas_con_score: campañasProcesadas };
   } catch (e) {
-    return { score: scoreGeneral, urgencia: etiquetaGeneral, diagnostico_general: "Análisis completado.", analisis_campañas: [] };
+    return { score: scoreGeneral, urgencia: etiquetaGeneral, diagnostico_general: "Error en análisis.", analisis_campañas: [] };
   }
 }
 
