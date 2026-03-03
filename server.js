@@ -89,15 +89,15 @@ function calcularScoreIndividual(c, rate) {
     scoreCreativo = Math.min(10, 7 + ((ctr - 2.0) * 1.5)); 
   }
 
-  // 3. SATURACIÓN (Frecuencia) - 15% del peso
+  // 3. SATURACIÓN (Frecuencia) - 15% del peso (ESCALA ESTRICTA)
   let scoreSaturacion = 10;
   const freq = n(c.freq);
-  if (freq <= 2.0) {
-    scoreSaturacion = 10 - ((freq - 1.0) * 2); 
-  } else if (freq <= 3.0) {
-    scoreSaturacion = 8 - ((freq - 2.0) * 4); 
+  if (freq <= 1.5) {
+    scoreSaturacion = 10 - ((freq - 1.0) * 4); // 1 a 1.5 (Muy bien)
+  } else if (freq < 2.0) {
+    scoreSaturacion = 8 - ((freq - 1.5) * 4); // 1.5 a 1.99 (Aceptable)
   } else {
-    scoreSaturacion = Math.max(1, 4 - ((freq - 3.0) * 2)); 
+    scoreSaturacion = Math.max(1, 4 - ((freq - 2.0) * 4)); // > 2.0 (Alerta)
   }
 
   // 4. SUBASTA (CPC) - 10% del peso
@@ -142,7 +142,7 @@ function obtenerEtiqueta(score) {
   return "REVISIÓN URGENTE";
 }
 
-// FUNCIÓN OPTIMIZADA DE PÚBLICO (Ahorro de tokens IA)
+// FUNCIÓN OPTIMIZADA DE PÚBLICO
 function analizarPublicoPorCampaña(data) {
   const campañas = data.campañas_detalle || [];
   return campañas.map(c => {
@@ -200,19 +200,25 @@ async function analizarConIA(data, currency) {
   Score General de la cuenta: ${scoreGeneral} (${etiquetaGeneral}).
   
   REGLAS DE ANÁLISIS:
-  1. No uses frases genéricas como "Analizado correctamente".
-  2. Justifica cada score individual. El score está ponderado por: Rentabilidad (40%), CTR (20%), Frecuencia (15%), Conversión (15%) y CPC (10%).
-  3. Revisa el objeto "AUDIENCIAS_PRECALCULADAS" para dar consejos de segmentación basados en la demografía ganadora.
-  4. PROHIBIDO mencionar ROAS en campañas de mensajes o leads.
+  1. No uses frases genéricas.
+  2. Justifica cada score individual considerando: Rentabilidad, CTR, Frecuencia, Conversión y CPC.
+  3. REGLA ESTRICTA DE FRECUENCIA: 
+     - De 1.0 a 1.5 es "Normal / Ideal".
+     - De 1.51 a 1.99 es "Aceptable".
+     - De 2.0 en adelante es "ALERTA / SATURACIÓN" (fatiga de anuncios). 
+     NUNCA digas que una frecuencia de 2.0 o superior es "adecuada". Debes marcarla como elevada o crítica.
+  4. CTR: < 1% es Alarma. 1% a 2% es Normal. > 2% es Excelente.
+  5. Revisa "AUDIENCIAS_PRECALCULADAS" para dar consejos de segmentación basados en la demografía ganadora.
+  6. PROHIBIDO mencionar ROAS en campañas de mensajes o leads.
 
   Formato de salida JSON estricto:
   {
-    "diagnostico_general": "Resumen estratégico profundo del mix de campañas y cumplimiento de objetivos...",
+    "diagnostico_general": "Resumen estratégico profundo del mix de campañas...",
     "urgencia": "${etiquetaGeneral}",
     "analisis_campañas": [
       {
         "id": "ID",
-        "feedback_ia": "Análisis táctico profundo justificando nota e integrando los insights de su público ganador...",
+        "feedback_ia": "Análisis táctico profundo justificando nota. Aplica las reglas estrictas de frecuencia y CTR...",
         "status_ia": "success | warning | danger"
       }
     ]
@@ -225,7 +231,7 @@ async function analizarConIA(data, currency) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.4,
-      messages: [{ role: "system", content: "Eres Luciano Juárez, analista experto y diplomático en Meta Ads." }, { role: "user", content: prompt }],
+      messages: [{ role: "system", content: "Eres Luciano Juárez, analista experto en Meta Ads. Eres estricto con la lectura de métricas." }, { role: "user", content: prompt }],
       response_format: { type: "json_object" }
     });
 
