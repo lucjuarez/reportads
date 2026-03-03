@@ -14,7 +14,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// BENCHMARKS ARS FIJOS
+// BENCHMARKS ARS FIJOS BASADOS EN TU EXPERIENCIA
 const BENCHMARK_ARS = {
   message: { acceptable: 1000, high: 2000 },
   lead: { acceptable: 3000, high: 6000 },
@@ -89,7 +89,7 @@ function calcularScoreIndividual(c, rate) {
     scoreCreativo = Math.min(10, 7 + ((ctr - 2.0) * 1.5)); 
   }
 
-  // 3. SATURACIÓN (Frecuencia) - 15% del peso (ESCALA ESTRICTA)
+  // 3. SATURACIÓN (Frecuencia) - 15% del peso (ESCALA ESTRICTA LUCIANO)
   let scoreSaturacion = 10;
   const freq = n(c.freq);
   if (freq <= 1.5) {
@@ -142,7 +142,7 @@ function obtenerEtiqueta(score) {
   return "REVISIÓN URGENTE";
 }
 
-// FUNCIÓN OPTIMIZADA DE PÚBLICO
+// FUNCIÓN OPTIMIZADA DE PÚBLICO (Ahorro de tokens)
 function analizarPublicoPorCampaña(data) {
   const campañas = data.campañas_detalle || [];
   return campañas.map(c => {
@@ -175,7 +175,7 @@ function analizarPublicoPorCampaña(data) {
   });
 }
 
-// MOTOR DE INTELIGENCIA ARTIFICIAL
+// MOTOR DE INTELIGENCIA ARTIFICIAL (Prompt Blindado)
 async function analizarConIA(data, currency) {
   const rate = await obtenerTipoCambio(currency);
   
@@ -206,10 +206,10 @@ async function analizarConIA(data, currency) {
      - De 1.0 a 1.5 es "Normal / Ideal".
      - De 1.51 a 1.99 es "Aceptable".
      - De 2.0 en adelante es "ALERTA / SATURACIÓN" (fatiga de anuncios). 
-     NUNCA digas que una frecuencia de 2.0 o superior es "adecuada". Debes marcarla como elevada o crítica.
+     NUNCA digas que una frecuencia de 2.0 o superior es "adecuada". Debes marcarla como crítica o elevada.
   4. CTR: < 1% es Alarma. 1% a 2% es Normal. > 2% es Excelente.
   5. Revisa "AUDIENCIAS_PRECALCULADAS" para dar consejos de segmentación basados en la demografía ganadora.
-  6. PROHIBIDO mencionar ROAS en campañas de mensajes o leads.
+  6. REGLA ESTRICTA DE OBJETIVOS: Si la campaña es de "Mensajes" (message), está ESTRICTAMENTE PROHIBIDO mencionar, exigir o criticar la falta de "leads", "compras", "conversiones directas" o "ROAS". Evalúa su éxito ÚNICAMENTE en base a su capacidad de generar Mensajes a buen costo, su CTR y su Frecuencia.
 
   Formato de salida JSON estricto:
   {
@@ -218,7 +218,7 @@ async function analizarConIA(data, currency) {
     "analisis_campañas": [
       {
         "id": "ID",
-        "feedback_ia": "Análisis táctico profundo justificando nota. Aplica las reglas estrictas de frecuencia y CTR...",
+        "feedback_ia": "Análisis táctico profundo justificando nota. Aplica las reglas estrictas de frecuencia, CTR y congruencia de objetivos...",
         "status_ia": "success | warning | danger"
       }
     ]
@@ -231,7 +231,7 @@ async function analizarConIA(data, currency) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.4,
-      messages: [{ role: "system", content: "Eres Luciano Juárez, analista experto en Meta Ads. Eres estricto con la lectura de métricas." }, { role: "user", content: prompt }],
+      messages: [{ role: "system", content: "Eres Luciano Juárez, analista experto en Meta Ads. Eres estricto con la lectura de métricas y objetivos." }, { role: "user", content: prompt }],
       response_format: { type: "json_object" }
     });
 
