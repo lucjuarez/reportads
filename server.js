@@ -14,7 +14,7 @@ const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// BENCHMARKS ARS FIJOS BASADOS EN TU EXPERIENCIA
+// BENCHMARKS ARS FIJOS
 const BENCHMARK_ARS = {
   message: { acceptable: 1000, high: 2000 },
   lead: { acceptable: 3000, high: 6000 },
@@ -51,7 +51,7 @@ function detectarObjetivo(c) {
   return "message";
 }
 
-// SCORE PONDERADO Y EXIGENTE (50% Rentabilidad, 20% CVR, 20% CTR, 10% Freq)
+// SCORE PONDERADO Y EXTREMADAMENTE PRECISO
 function calcularScoreIndividual(c, rate) {
   if (n(c.spend) === 0) return 0; 
 
@@ -59,16 +59,59 @@ function calcularScoreIndividual(c, rate) {
   const costoARS = n(c.cpr_meta) * rate;
   const ref = BENCHMARK_ARS[obj];
 
+  // 1. RENTABILIDAD (CPR) - 40% del peso
   let scoreRentabilidad = 5; 
   if (n(c.spend) > 500 * rate && n(c.resultados_obj) === 0) {
     scoreRentabilidad = 1; 
   } else if (costoARS > 0 && ref) {
-    if (costoARS <= ref.acceptable) scoreRentabilidad = 10;
-    else if (costoARS <= ref.high) scoreRentabilidad = 10 - (((costoARS - ref.acceptable) / (ref.high - ref.acceptable)) * 5);
-    else scoreRentabilidad = Math.max(1, 5 - (((costoARS - ref.high) / ref.high) * 5));
+    const minOptimo = ref.acceptable * 0.1; 
+    
+    if (costoARS <= minOptimo) {
+      scoreRentabilidad = 10; 
+    } else if (costoARS <= ref.acceptable) {
+      scoreRentabilidad = 10 - (4 * ((costoARS - minOptimo) / (ref.acceptable - minOptimo)));
+    } else if (costoARS <= ref.high) {
+      scoreRentabilidad = 6 - (4 * ((costoARS - ref.acceptable) / (ref.high - ref.acceptable)));
+    } else {
+      scoreRentabilidad = 1; 
+    }
   }
   if (obj === "purchase" && n(c.roas_meta) >= 3) scoreRentabilidad = Math.min(10, scoreRentabilidad + 2);
 
+  // 2. CREATIVOS (CTR) - 20% del peso
+  let scoreCreativo = 1;
+  const ctr = n(c.ctr_meta);
+  if (ctr < 1.0) {
+    scoreCreativo = Math.max(1, ctr * 4); 
+  } else if (ctr <= 2.0) {
+    scoreCreativo = 5 + ((ctr - 1.0) * 2); 
+  } else {
+    scoreCreativo = Math.min(10, 7 + ((ctr - 2.0) * 1.5)); 
+  }
+
+  // 3. SATURACIÓN (Frecuencia) - 15% del peso
+  let scoreSaturacion = 10;
+  const freq = n(c.freq);
+  if (freq <= 2.0) {
+    scoreSaturacion = 10 - ((freq - 1.0) * 2); 
+  } else if (freq <= 3.0) {
+    scoreSaturacion = 8 - ((freq - 2.0) * 4); 
+  } else {
+    scoreSaturacion = Math.max(1, 4 - ((freq - 3.0) * 2)); 
+  }
+
+  // 4. SUBASTA (CPC) - 10% del peso
+  let scoreCPC = 5;
+  const cpcARS = n(c.cpc_meta) * rate;
+  const cpcIdeal = ref ? ref.acceptable * 0.05 : 50 * rate; 
+  if (cpcARS > 0) {
+    if (cpcARS <= cpcIdeal) scoreCPC = 10;
+    else if (cpcARS <= cpcIdeal * 2) scoreCPC = 10 - (3 * ((cpcARS - cpcIdeal) / cpcIdeal)); 
+    else if (cpcARS <= cpcIdeal * 4) scoreCPC = 7 - (4 * ((cpcARS - (cpcIdeal*2)) / (cpcIdeal*2))); 
+    else scoreCPC = Math.max(1, 3 - ((cpcARS - (cpcIdeal*4)) / (cpcIdeal*2))); 
+  }
+
+  // 5. CALIDAD DE TRÁFICO (CVR) - 15% del peso
   let scoreTrafico = 5;
   const clics = n(c.clicks);
   const resultados = n(c.resultados_obj);
@@ -80,21 +123,14 @@ function calcularScoreIndividual(c, rate) {
     else scoreTrafico = 2; 
   }
 
-  let scoreCreativo = 5;
-  const ctr = n(c.ctr_meta);
-  if (ctr >= 2.0) scoreCreativo = 10;
-  else if (ctr >= 1.0) scoreCreativo = 7;
-  else if (ctr >= 0.5) scoreCreativo = 4;
-  else scoreCreativo = 2; 
+  // CÁLCULO FINAL PONDERADO
+  const scoreFinal = 
+    (scoreRentabilidad * 0.40) + 
+    (scoreCreativo * 0.20) + 
+    (scoreSaturacion * 0.15) + 
+    (scoreTrafico * 0.15) +
+    (scoreCPC * 0.10);
 
-  let scoreSaturacion = 5;
-  const freq = n(c.freq);
-  if (freq <= 2.0) scoreSaturacion = 10;
-  else if (freq <= 3.0) scoreSaturacion = 8;
-  else if (freq <= 4.0) scoreSaturacion = 5;
-  else scoreSaturacion = 2; 
-
-  const scoreFinal = (scoreRentabilidad * 0.50) + (scoreTrafico * 0.20) + (scoreCreativo * 0.20) + (scoreSaturacion * 0.10);
   return Number(Math.min(10, Math.max(1, scoreFinal)).toFixed(1));
 }
 
@@ -106,7 +142,7 @@ function obtenerEtiqueta(score) {
   return "REVISIÓN URGENTE";
 }
 
-// NUEVA FUNCIÓN OPTIMIZADA (Extraída del clon)
+// FUNCIÓN OPTIMIZADA DE PÚBLICO (Ahorro de tokens IA)
 function analizarPublicoPorCampaña(data) {
   const campañas = data.campañas_detalle || [];
   return campañas.map(c => {
@@ -139,6 +175,7 @@ function analizarPublicoPorCampaña(data) {
   });
 }
 
+// MOTOR DE INTELIGENCIA ARTIFICIAL
 async function analizarConIA(data, currency) {
   const rate = await obtenerTipoCambio(currency);
   
@@ -156,23 +193,21 @@ async function analizarConIA(data, currency) {
     : 0;
   const etiquetaGeneral = obtenerEtiqueta(scoreGeneral);
 
-  // Procesamos la audiencia matemáticamente en el servidor, sin gastar IA
   const publicoProcesado = analizarPublicoPorCampaña(data);
 
-  // Le pasamos la audiencia ya digerida al prompt para que solo la interprete
   const prompt = `Actúa como Luciano Juárez, estratega senior de Paid Media. Reporte profesional.
   
   Score General de la cuenta: ${scoreGeneral} (${etiquetaGeneral}).
   
   REGLAS DE ANÁLISIS:
-  1. Justifica cada score individual basado en los 4 pilares: Rentabilidad (CPR), Calidad de Clics (Conversión), Creativos (CTR) y Saturación (Frecuencia).
-  2. Revisa el objeto "AUDIENCIAS_PRECALCULADAS" para dar consejos de segmentación en el feedback de cada campaña.
-  3. Sugiere optimizaciones concretas sin ser alarmista.
+  1. No uses frases genéricas como "Analizado correctamente".
+  2. Justifica cada score individual. El score está ponderado por: Rentabilidad (40%), CTR (20%), Frecuencia (15%), Conversión (15%) y CPC (10%).
+  3. Revisa el objeto "AUDIENCIAS_PRECALCULADAS" para dar consejos de segmentación basados en la demografía ganadora.
   4. PROHIBIDO mencionar ROAS en campañas de mensajes o leads.
 
-  Formato de salida JSON estricto (NO incluyas el análisis de público aquí, solo devuelve lo siguiente):
+  Formato de salida JSON estricto:
   {
-    "diagnostico_general": "Resumen estratégico de la cuenta...",
+    "diagnostico_general": "Resumen estratégico profundo del mix de campañas y cumplimiento de objetivos...",
     "urgencia": "${etiquetaGeneral}",
     "analisis_campañas": [
       {
@@ -190,13 +225,12 @@ async function analizarConIA(data, currency) {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0.4,
-      messages: [{ role: "system", content: "Eres Luciano Juárez, analista experto en Meta Ads." }, { role: "user", content: prompt }],
+      messages: [{ role: "system", content: "Eres Luciano Juárez, analista experto y diplomático en Meta Ads." }, { role: "user", content: prompt }],
       response_format: { type: "json_object" }
     });
 
     const parsed = JSON.parse(response.choices[0].message.content);
     
-    // Inyectamos el público calculado localmente en la respuesta que va al Frontend
     return { 
       ...parsed, 
       score: scoreGeneral, 
