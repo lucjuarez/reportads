@@ -1,255 +1,170 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
-import OpenAI from "openai";
-import fetch from "node-fetch";
+import express from 'express';
+import OpenAI from 'openai';
+import dotenv from 'dotenv';
+import cors from 'cors';
 
+// Cargar variables de entorno
 dotenv.config();
 
 const app = express();
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
 
+app.use(cors());
+app.use(express.json());
+
+// Inicializar OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-// BENCHMARKS ARS FIJOS BASADOS EN TU EXPERIENCIA
-const BENCHMARK_ARS = {
-  message: { acceptable: 1000, high: 2000 },
-  lead: { acceptable: 3000, high: 6000 },
-  purchase: { acceptable: 15000, high: 30000 },
-  cart: { acceptable: 1000, high: 2000 },
-  profile_visit: { acceptable: 1000, high: 2000 },
-  lpv: { acceptable: 1000, high: 2000 }
-};
+const SYSTEM_PROMPT = `
+Eres un Media Buyer Senior y Copywriter de respuesta directa experto en Meta Ads. 
+Tu trabajo es analizar la información de un negocio y crear una estrategia y 3 variantes de anuncios enfocados en conversión.
 
-let exchangeCache = { rate: 1, currency: "ARS", timestamp: 0 };
-const n = (v) => Number(v) || 0;
+Reglas de Copywriting:
+1. primary_text: Fórmula AIDA, máximo 3 párrafos cortos.
+2. headline: Directo, máximo 5 palabras.
+3. text_for_image: Máximo 6 palabras, diseñado para llamar la atención haciendo scroll.
+4. image_generation_prompt: EN INGLÉS. Describe la escena fotográfica o diseño. MUY IMPORTANTE: Especifica que debe haber "completely empty negative space" (espacio vacío) para superponer texto después.
 
-async function obtenerTipoCambio(currency) {
-  if (currency === "ARS") return 1;
-  const now = Date.now();
-  if (exchangeCache.currency === currency && now - exchangeCache.timestamp < 1000 * 60 * 60) return exchangeCache.rate;
+REGLA CRÍTICA DE FORMATO:
+Debes responder ÚNICAMENTE con un objeto JSON válido. No uses bloques de código markdown (\`\`\`json).
+Estructura exacta:
+{ 
+  "campaign": { "objective": "", "daily_budget": 0 }, 
+  "ad_set": { "audience": { "age_min": 0, "age_max": 0, "locations": [], "interests": [] } }, 
+  "ads": [ 
+    { "ad_name": "", "primary_text": "", "headline": "", "image_generation_prompt": "", "text_for_image": "" } 
+  ] 
+}
+`;
+
+// ============================================================================
+// ENDPOINT 1: GENERAR ESTRATEGIA (OPENAI)
+// ============================================================================
+app.post('/api/generate-campaign', async (req, res) => {
   try {
-    const res = await fetch(`https://api.exchangerate-api.com/v4/latest/${currency}`);
-    const data = await res.json();
-    const rate = data?.rates?.ARS || 1;
-    exchangeCache = { rate, currency, timestamp: now };
-    return rate;
-  } catch (e) { return 1; }
-}
+    const { businessContext } = req.body;
 
-function detectarObjetivo(c) {
-  const objective = (c.objective || "").toUpperCase();
-  const optGoal = (c.optimization_goal || "").toUpperCase();
-  const convLocation = (c.conversion_location || "").toUpperCase();
-  const campName = (c.name || "").toUpperCase(); 
-  if (convLocation.includes("MESSAGE") || convLocation.includes("WHATSAPP") || objective.includes("MESSAGE") || campName.includes("WSP")) return "message";
-  if (objective.includes("LEAD") || campName.includes("LEAD")) return "lead";
-  if (objective.includes("PURCHASE") || campName.includes("COMPRA")) return "purchase";
-  return "message";
-}
-
-// SCORE PONDERADO Y EXTREMADAMENTE PRECISO
-function calcularScoreIndividual(c, rate) {
-  if (n(c.spend) === 0) return 0; 
-
-  const obj = detectarObjetivo(c);
-  const costoARS = n(c.cpr_meta) * rate;
-  const ref = BENCHMARK_ARS[obj];
-
-  // 1. RENTABILIDAD (CPR) - 40% del peso
-  let scoreRentabilidad = 5; 
-  if (n(c.spend) > 500 * rate && n(c.resultados_obj) === 0) {
-    scoreRentabilidad = 1; 
-  } else if (costoARS > 0 && ref) {
-    const minOptimo = ref.acceptable * 0.1; 
-    
-    if (costoARS <= minOptimo) {
-      scoreRentabilidad = 10; 
-    } else if (costoARS <= ref.acceptable) {
-      scoreRentabilidad = 10 - (4 * ((costoARS - minOptimo) / (ref.acceptable - minOptimo)));
-    } else if (costoARS <= ref.high) {
-      scoreRentabilidad = 6 - (4 * ((costoARS - ref.acceptable) / (ref.high - ref.acceptable)));
-    } else {
-      scoreRentabilidad = 1; 
+    if (!businessContext) {
+      return res.status(400).json({ error: "Falta el contexto del negocio" });
     }
-  }
-  if (obj === "purchase" && n(c.roas_meta) >= 3) scoreRentabilidad = Math.min(10, scoreRentabilidad + 2);
 
-  // 2. CREATIVOS (CTR) - 20% del peso
-  let scoreCreativo = 1;
-  const ctr = n(c.ctr_meta);
-  if (ctr < 1.0) {
-    scoreCreativo = Math.max(1, ctr * 4); 
-  } else if (ctr <= 2.0) {
-    scoreCreativo = 5 + ((ctr - 1.0) * 2); 
-  } else {
-    scoreCreativo = Math.min(10, 7 + ((ctr - 2.0) * 1.5)); 
-  }
+    console.log("⏳ Generando estructura de campaña con IA...");
 
-  // 3. SATURACIÓN (Frecuencia) - 15% del peso (ESCALA ESTRICTA)
-  let scoreSaturacion = 10;
-  const freq = n(c.freq);
-  if (freq <= 1.5) {
-    scoreSaturacion = 10 - ((freq - 1.0) * 4); 
-  } else if (freq < 2.0) {
-    scoreSaturacion = 8 - ((freq - 1.5) * 4); 
-  } else {
-    scoreSaturacion = Math.max(1, 4 - ((freq - 2.0) * 4)); 
-  }
-
-  // 4. SUBASTA (CPC) - 10% del peso
-  let scoreCPC = 5;
-  const cpcARS = n(c.cpc_meta) * rate;
-  const cpcIdeal = ref ? ref.acceptable * 0.05 : 50 * rate; 
-  if (cpcARS > 0) {
-    if (cpcARS <= cpcIdeal) scoreCPC = 10;
-    else if (cpcARS <= cpcIdeal * 2) scoreCPC = 10 - (3 * ((cpcARS - cpcIdeal) / cpcIdeal)); 
-    else if (cpcARS <= cpcIdeal * 4) scoreCPC = 7 - (4 * ((cpcARS - (cpcIdeal*2)) / (cpcIdeal*2))); 
-    else scoreCPC = Math.max(1, 3 - ((cpcARS - (cpcIdeal*4)) / (cpcIdeal*2))); 
-  }
-
-  // 5. CALIDAD DE TRÁFICO (CVR) - 15% del peso
-  let scoreTrafico = 5;
-  const clics = n(c.clicks);
-  const resultados = n(c.resultados_obj);
-  if (clics > 0) {
-    const cvr = (resultados / clics) * 100; 
-    if (cvr >= 10) scoreTrafico = 10;
-    else if (cvr >= 5) scoreTrafico = 8;
-    else if (cvr >= 2) scoreTrafico = 5;
-    else scoreTrafico = 2; 
-  }
-
-  // CÁLCULO FINAL PONDERADO
-  const scoreFinal = 
-    (scoreRentabilidad * 0.40) + 
-    (scoreCreativo * 0.20) + 
-    (scoreSaturacion * 0.15) + 
-    (scoreTrafico * 0.15) +
-    (scoreCPC * 0.10);
-
-  return Number(Math.min(10, Math.max(1, scoreFinal)).toFixed(1));
-}
-
-function obtenerEtiqueta(score) {
-  if (score >= 8.5) return "EXCELENTE";
-  if (score >= 7.0) return "SÓLIDO";
-  if (score >= 5.5) return "ESTABLE";
-  if (score >= 4.0) return "A OPTIMIZAR";
-  return "REVISIÓN URGENTE";
-}
-
-// FUNCIÓN OPTIMIZADA DE PÚBLICO
-function analizarPublicoPorCampaña(data) {
-  const campañas = data.campañas_detalle || [];
-  return campañas.map(c => {
-    const edades = {};
-    const generos = {};
-    const paises = {};
-    const ciudadesPorPais = {};
-
-    (c.breakdowns || []).forEach(b => {
-      const resultados = n(b.resultados);
-      if (b.age) edades[b.age] = (edades[b.age] || 0) + resultados;
-      if (b.gender) generos[b.gender] = (generos[b.gender] || 0) + resultados;
-      if (b.country) {
-        paises[b.country] = (paises[b.country] || 0) + resultados;
-        if (!ciudadesPorPais[b.country]) ciudadesPorPais[b.country] = {};
-        if (b.city) ciudadesPorPais[b.country][b.city] = (ciudadesPorPais[b.country][b.city] || 0) + resultados;
-      }
-    });
-
-    return {
-      id: c.id,
-      mejor_segmento_edad: Object.entries(edades).sort((a,b)=>b[1]-a[1])[0]?.[0] || null,
-      mejor_genero: Object.entries(generos).sort((a,b)=>b[1]-a[1])[0]?.[0] || null,
-      top_3_paises: Object.entries(paises).sort((a,b)=>b[1]-a[1]).slice(0,3).map(p=>p[0]),
-      top_3_ciudades_por_pais: Object.keys(ciudadesPorPais).reduce((acc, pais) => {
-        acc[pais] = Object.entries(ciudadesPorPais[pais]).sort((a,b)=>b[1]-a[1]).slice(0,3).map(c=>c[0]);
-        return acc;
-      }, {})
-    };
-  });
-}
-
-// MOTOR DE INTELIGENCIA ARTIFICIAL (CLIENT-FACING)
-async function analizarConIA(data, currency) {
-  const rate = await obtenerTipoCambio(currency);
-  
-  const campañasProcesadas = (data.campañas_detalle || []).map(c => {
-    const individualScore = calcularScoreIndividual(c, rate);
-    return {
-      ...c,
-      score_individual: individualScore,
-      etiqueta_individual: individualScore > 0 ? obtenerEtiqueta(individualScore) : "SIN GASTO"
-    };
-  }).filter(c => c.spend > 0);
-
-  const scoreGeneral = campañasProcesadas.length > 0 
-    ? Number((campañasProcesadas.reduce((acc, curr) => acc + curr.score_individual, 0) / campañasProcesadas.length).toFixed(1))
-    : 0;
-  const etiquetaGeneral = obtenerEtiqueta(scoreGeneral);
-
-  const publicoProcesado = analizarPublicoPorCampaña(data);
-
-  const prompt = `Actúa como Luciano Juárez, estratega senior de Paid Media. ESTE REPORTE SERÁ LEÍDO POR EL CLIENTE FINAL (el dueño del negocio).
-  
-  Score General de la cuenta: ${scoreGeneral} (${etiquetaGeneral}).
-  
-  REGLAS DE ANÁLISIS:
-  1. TONO CLIENT-FACING: Usa un tono ejecutivo, diplomático, constructivo y enfocado en el negocio. Habla de "oportunidades de optimización" en lugar de "errores" o "desastres". 
-  2. DIAGNÓSTICO GENERAL (VISIÓN DE DIRECTOR): Esta sección debe dar una visión macro. Analiza el mix de objetivos utilizados, cómo se está distribuyendo la inversión y recomienda una estrategia global para el negocio. ESTÁ PROHIBIDO repetir métricas individuales de campañas aquí.
-  3. REGLA ESTRICTA DE FRECUENCIA: 
-     - 1.0 a 1.5: "Normal / Ideal".
-     - 1.51 a 1.99: "Aceptable".
-     - >= 2.0: "Saturación / Fatiga". Menciónalo como una oportunidad para renovar creativos, pero nunca digas que es "adecuada".
-  4. CTR: < 1% (Requiere mejora), 1% a 2% (Promedio sano), > 2% (Excelente retención).
-  5. Revisa "AUDIENCIAS_PRECALCULADAS" para sugerir en qué público enfocarse de manera amable.
-  6. REGLA ESTRICTA DE OBJETIVOS: Si la campaña es de "Mensajes" (message), está ESTRICTAMENTE PROHIBIDO mencionar, exigir o criticar la falta de "leads" o "compras". Evalúa su éxito ÚNICAMENTE por los Mensajes, CTR y Frecuencia.
-
-  Formato de salida JSON estricto:
-  {
-    "diagnostico_general": "Visión macro del negocio. Análisis del mix de objetivos, distribución del presupuesto y recomendación global estratégica. Tono ejecutivo.",
-    "urgencia": "${etiquetaGeneral}",
-    "analisis_campañas": [
-      {
-        "id": "ID",
-        "feedback_ia": "Análisis táctico profesional. Aplica las reglas estrictas y orienta al cliente sobre los próximos pasos...",
-        "status_ia": "success | warning | danger"
-      }
-    ]
-  }
-
-  DATOS MÉTRICAS: ${JSON.stringify(campañasProcesadas)}
-  AUDIENCIAS_PRECALCULADAS: ${JSON.stringify(publicoProcesado)}`;
-
-  try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      temperature: 0.4,
-      messages: [{ role: "system", content: "Eres Luciano Juárez, consultor en Meta Ads. Hablas con diplomacia ejecutiva y visión de negocios." }, { role: "user", content: prompt }],
-      response_format: { type: "json_object" }
+      response_format: { type: "json_object" },
+      temperature: 0.7,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: `Contexto del negocio: ${businessContext}` }
+      ]
     });
 
-    const parsed = JSON.parse(response.choices[0].message.content);
-    
-    return { 
-      ...parsed, 
-      score: scoreGeneral, 
-      campañas_con_score: campañasProcesadas,
-      analisis_publico_por_campaña: publicoProcesado 
-    };
-  } catch (e) {
-    return { score: scoreGeneral, urgencia: etiquetaGeneral, diagnostico_general: "Error en el análisis de IA.", analisis_campañas: [], analisis_publico_por_campaña: publicoProcesado };
-  }
-}
+    const aiResponseText = response.choices[0].message.content;
+    const campaignData = JSON.parse(aiResponseText);
 
-app.post("/analizar", async (req, res) => {
-  const resIA = await analizarConIA(req.body, req.body.currency);
-  res.json(resIA);
+    res.json(campaignData);
+
+  } catch (error) {
+    console.error("❌ Error en Fase 1:", error);
+    res.status(500).json({ error: "Ocurrió un error al procesar la estrategia." });
+  }
 });
 
-app.listen(process.env.PORT || 3000, () => console.log("Backend ReportAds OK"));
+// ============================================================================
+// ENDPOINT 2: GENERAR IMAGEN (DALL-E 3)
+// ============================================================================
+app.post('/api/generate-creative', async (req, res) => {
+  try {
+    const { imagePrompt, imageText } = req.body;
+
+    if (!imagePrompt || !imageText) {
+      return res.status(400).json({ error: "Faltan datos para generar la imagen" });
+    }
+
+    console.log(`🎨 Llamando a DALL-E 3...`);
+
+    const imageResponse = await openai.images.generate({
+      model: "dall-e-3",
+      prompt: imagePrompt + ". IMPORTANT: Leave an empty solid color negative space perfectly clear to overlay the following text later: '" + imageText + "'.",
+      n: 1,
+      size: "1024x1024",
+      quality: "standard",
+    });
+
+    const backgroundImageUrl = imageResponse.data[0].url;
+
+    res.json({
+      success: true,
+      original_background: backgroundImageUrl,
+      final_creative_url: backgroundImageUrl, 
+      applied_text: imageText
+    });
+
+  } catch (error) {
+    console.error("❌ Error en Fase 2:", error);
+    res.status(500).json({ error: "Ocurrió un error al generar el creativo visual." });
+  }
+});
+
+// ============================================================================
+// ENDPOINT 3: PUBLICAR EN META ADS (ACTUALIZADO PARA MÚLTIPLES USUARIOS)
+// ============================================================================
+app.post('/api/publish-campaign', async (req, res) => {
+  try {
+    // Ahora el backend espera recibir las llaves desde el frontend
+    const { campaignName, objective, userAccessToken, userAccountId } = req.body;
+    
+    // Si el cliente envía sus propias llaves, las usamos. Si no, usamos las tuyas de prueba en Render (como respaldo).
+    const ACCESS_TOKEN = userAccessToken || process.env.META_ACCESS_TOKEN;
+    const AD_ACCOUNT_ID = userAccountId || process.env.META_AD_ACCOUNT_ID;
+
+    if (!ACCESS_TOKEN || !AD_ACCOUNT_ID) {
+      console.error("❌ Faltan credenciales. Token:", !!ACCESS_TOKEN, "Cuenta:", !!AD_ACCOUNT_ID);
+      return res.status(400).json({ error: "Faltan las credenciales de Meta (Token o ID de cuenta)." });
+    }
+
+    console.log(`🚀 [FASE 3] Creando campaña en Meta... Objetivo: ${objective}`);
+
+    // Llamada HTTP a la Graph API de Meta
+    const metaResponse = await fetch(`https://graph.facebook.com/v19.0/${AD_ACCOUNT_ID}/campaigns`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: campaignName || "Campaña Generada por IA - Ads Creator",
+        objective: objective || "OUTCOME_LEADS",
+        status: "PAUSED", // SIEMPRE en pausa por seguridad
+        special_ad_categories: [], // Obligatorio para la API
+        access_token: ACCESS_TOKEN
+      })
+    });
+
+    const metaData = await metaResponse.json();
+
+    if (metaData.error) {
+      console.error("❌ Error de Meta:", metaData.error);
+      return res.status(400).json({ error: metaData.error.message });
+    }
+
+    console.log("✅ [FASE 3] Campaña creada con éxito. ID:", metaData.id);
+
+    res.json({
+      success: true,
+      campaign_id: metaData.id,
+      message: "Campaña creada en modo borrador"
+    });
+
+  } catch (error) {
+    console.error("❌ Error interno:", error);
+    res.status(500).json({ error: "Ocurrió un error al conectar con Meta." });
+  }
+});
+
+const PORT = process.env.PORT || 3000;
+
+app.listen(PORT, () => {
+  console.log(`🚀 Ads Creator Backend corriendo en el puerto: ${PORT}`);
+});
