@@ -7,7 +7,6 @@ import cors from 'cors';
 dotenv.config();
 
 const app = express();
-
 app.use(cors());
 app.use(express.json());
 
@@ -17,50 +16,39 @@ const openai = new OpenAI({
 });
 
 // ============================================================================
-// SYSTEM PROMPT: ACTUALIZADO CON ENFOQUE ESTRATÉGICO PARA EL CLIENTE
+// SYSTEM PROMPT: EL CONSULTOR ESTRATÉGICO (AUDITORÍA)
 // ============================================================================
 const SYSTEM_PROMPT = `
-Eres un Media Buyer Senior y Copywriter de respuesta directa experto en Meta Ads. 
-Tu trabajo es analizar la información de un negocio y crear una estrategia y 3 variantes de anuncios enfocados en conversión.
+Eres Luciano Juárez, Director de Estrategia y Media Buyer Senior. Tu misión es auditar una cuenta de Meta Ads y redactar un Diagnóstico Estratégico para el dueño del negocio.
 
-TU ANÁLISIS ESTRATÉGICO DEBE ENFOCARSE EN EL DUEÑO DEL NEGOCIO (EL CLIENTE):
-Tu respuesta debe incluir una explicación estratégica clara, dirigida a un dueño de negocio (no a un técnico). Debes:
-1. Explicar la **Estrategia Global** elegida y por qué es la mejor decisión comercial para sus objetivos actuales.
-2. Describir los **Tipos de Campañas** incluidos y el ROL específico que cumple cada una dentro del ecosistema de ventas del cliente.
-3. Usar lenguaje de **negocios**, no técnico (habla de 'rentabilidad', 'flujo de prospectos calificados', 'eficiencia del capital' y 'protección de la inversión').
-
-Reglas de Copywriting:
-1. primary_text: Fórmula AIDA, máximo 3 párrafos cortos.
-2. headline: Directo, máximo 5 palabras.
-3. text_for_image: Máximo 6 palabras, diseñado para llamar la atención haciendo scroll.
-4. image_generation_prompt: EN INGLÉS. Describe la escena fotográfica o diseño. MUY IMPORTANTE: Especifica que debe haber "completely empty negative space" (espacio vacío) para superponer texto después.
+OBJETIVO DEL DIAGNÓSTICO (Campo diagnostico_general):
+1. ESTRATEGIA GLOBAL: Explica la arquitectura de la cuenta (ej. "Estamos ejecutando un ecosistema que combina captación de tráfico con cierre por mensajes").
+2. ROL DE LAS CAMPAÑAS: Define para qué sirve cada una (ej. "La campaña A atrae interesados y la campaña B recupera a los que no consultaron").
+3. LENGUAJE DE NEGOCIOS: Habla de "rentabilidad", "flujo de ventas", "eficiencia del capital" y "salud del negocio". 
+4. FOCO EN EL CLIENTE: El cliente debe sentir que su inversión está bajo una estrategia lógica y segura. Evita tecnicismos que no sumen claridad.
 
 REGLA CRÍTICA DE FORMATO:
-Debes responder ÚNICAMENTE con un objeto JSON válido. No uses bloques de código markdown (\`\`\`json).
-
-Estructura exacta que debes devolver:
-{ 
-  "explicacion_estrategica": "Aquí va la narrativa de alto nivel dirigida al cliente explicando la estrategia global y roles de campañas",
-  "campaign": { "objective": "", "daily_budget": 0 }, 
-  "ad_set": { "audience": { "age_min": 0, "age_max": 0, "locations": [], "interests": [] } }, 
-  "ads": [ 
-    { "ad_name": "", "primary_text": "", "headline": "", "image_generation_prompt": "", "text_for_image": "" } 
-  ] 
+Responde ÚNICAMENTE con un objeto JSON válido.
+Estructura exacta:
+{
+  "score": 0.0,
+  "urgencia": "ESTABLE | PRECAUCIÓN | CRÍTICO",
+  "diagnostico_general": "Aquí va el análisis de alto nivel sobre la estrategia global y el rol de las campañas en el negocio.",
+  "analisis_campañas": [
+    { "id": "", "status_ia": "success/warning/danger", "feedback_ia": "Análisis estratégico de esta campaña puntual." }
+  ],
+  "analisis_publico_por_campaña": [
+    { "id": "", "mejor_segmento_edad": "", "mejor_genero": "", "top_3_paises": [], "top_3_ciudades_por_pais": {} }
+  ]
 }
 `;
 
-// ============================================================================
-// ENDPOINT 1: GENERAR ESTRATEGIA (OPENAI) - AHORA INCLUYE EXPLICACIÓN ESTRATÉGICA
-// ============================================================================
-app.post('/api/generate-campaign', async (req, res) => {
+// RUTA PARA EL FRONTEND DE REPORTADS
+app.post('/analizar', async (req, res) => {
   try {
-    const { businessContext } = req.body;
+    const { campañas_detalle, currency } = req.body;
 
-    if (!businessContext) {
-      return res.status(400).json({ error: "Falta el contexto del negocio" });
-    }
-
-    console.log("⏳ Generando estructura estratégica de campaña con IA...");
+    console.log("⏳ Generando Auditoría Estratégica con visión de negocio...");
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -68,114 +56,20 @@ app.post('/api/generate-campaign', async (req, res) => {
       temperature: 0.7,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: `Contexto del negocio y objetivos del cliente: ${businessContext}` }
+        { role: "user", content: `Analiza este ecosistema de campañas en ${currency}: ${JSON.stringify(campañas_detalle)}` }
       ]
     });
 
-    const aiResponseText = response.choices[0].message.content;
-    const campaignData = JSON.parse(aiResponseText);
-
-    res.json(campaignData);
+    const aiRes = JSON.parse(response.choices[0].message.content);
+    res.json(aiRes);
 
   } catch (error) {
-    console.error("❌ Error en Fase 1:", error);
-    res.status(500).json({ error: "Ocurrió un error al procesar la estrategia." });
-  }
-});
-
-// ============================================================================
-// ENDPOINT 2: GENERAR IMAGEN (DALL-E 3)
-// ============================================================================
-app.post('/api/generate-creative', async (req, res) => {
-  try {
-    const { imagePrompt, imageText } = req.body;
-
-    if (!imagePrompt || !imageText) {
-      return res.status(400).json({ error: "Faltan datos para generar la imagen" });
-    }
-
-    console.log(`🎨 Llamando a DALL-E 3...`);
-
-    const imageResponse = await openai.images.generate({
-      model: "dall-e-3",
-      prompt: imagePrompt + ". IMPORTANT: Leave an empty solid color negative space perfectly clear to overlay the following text later: '" + imageText + "'.",
-      n: 1,
-      size: "1024x1024",
-      quality: "standard",
-    });
-
-    const backgroundImageUrl = imageResponse.data[0].url;
-
-    res.json({
-      success: true,
-      original_background: backgroundImageUrl,
-      final_creative_url: backgroundImageUrl, 
-      applied_text: imageText
-    });
-
-  } catch (error) {
-    console.error("❌ Error en Fase 2:", error);
-    res.status(500).json({ error: "Ocurrió un error al generar el creativo visual." });
-  }
-});
-
-// ============================================================================
-// ENDPOINT 3: PUBLICAR EN META ADS (ACTUALIZADO PARA MÚLTIPLES USUARIOS)
-// ============================================================================
-app.post('/api/publish-campaign', async (req, res) => {
-  try {
-    // Ahora el backend espera recibir las llaves desde el frontend
-    const { campaignName, objective, userAccessToken, userAccountId } = req.body;
-    
-    // Si el cliente envía sus propias llaves, las usamos. Si no, usamos las tuyas de prueba en Render (como respaldo).
-    const ACCESS_TOKEN = userAccessToken || process.env.META_ACCESS_TOKEN;
-    const AD_ACCOUNT_ID = userAccountId || process.env.META_AD_ACCOUNT_ID;
-
-    if (!ACCESS_TOKEN || !AD_ACCOUNT_ID) {
-      console.error("❌ Faltan credenciales. Token:", !!ACCESS_TOKEN, "Cuenta:", !!AD_ACCOUNT_ID);
-      return res.status(400).json({ error: "Faltan las credenciales de Meta (Token o ID de cuenta)." });
-    }
-
-    console.log(`🚀 [FASE 3] Creando campaña en Meta... Objetivo: ${objective}`);
-
-    // Llamada HTTP a la Graph API de Meta
-    const metaResponse = await fetch(`https://graph.facebook.com/v19.0/${AD_ACCOUNT_ID}/campaigns`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        name: campaignName || "Campaña Estratégica Generada por IA - Ads Creator",
-        objective: objective || "OUTCOME_LEADS",
-        status: "PAUSED", // SIEMPRE en pausa por seguridad
-        special_ad_categories: [], // Obligatorio para la API
-        access_token: ACCESS_TOKEN
-      })
-    });
-
-    const metaData = await metaResponse.json();
-
-    if (metaData.error) {
-      console.error("❌ Error de Meta:", metaData.error);
-      return res.status(400).json({ error: metaData.error.message });
-    }
-
-    console.log("✅ [FASE 3] Campaña creada con éxito. ID:", metaData.id);
-
-    res.json({
-      success: true,
-      campaign_id: metaData.id,
-      message: "Campaña creada en modo borrador"
-    });
-
-  } catch (error) {
-    console.error("❌ Error interno:", error);
-    res.status(500).json({ error: "Ocurrió un error al conectar con Meta." });
+    console.error("❌ Error en Auditoría:", error);
+    res.status(500).json({ error: "No se pudo generar el diagnóstico estratégico." });
   }
 });
 
 const PORT = process.env.PORT || 3000;
-
 app.listen(PORT, () => {
-  console.log(`🚀 Ads Creator Backend corriendo en el puerto: ${PORT}`);
+  console.log(`🚀 ReportAds Auditor Backend corriendo en puerto ${PORT}`);
 });
