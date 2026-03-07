@@ -20,7 +20,6 @@ const openai = new OpenAI({
 // 1. CONFIGURACIÓN ESTRATÉGICA Y BENCHMARKS (ARS)
 //////////////////////////////////////////////////////////
 
-// Valores de referencia para el mercado argentino (Luciano Juarez Benchmarks)
 const BENCHMARK_ARS = {
     message: { acceptable: 1000, high: 2000 },
     lead: { acceptable: 15000, high: 30000 },
@@ -30,7 +29,6 @@ const BENCHMARK_ARS = {
     lpv: { acceptable: 500, high: 1200 }
 };
 
-// Caché para evitar llamadas excesivas a la API de tipo de cambio
 let exchangeCache = {
     rate: 1,
     currency: "ARS",
@@ -43,14 +41,10 @@ let exchangeCache = {
 
 const n = (v) => Number(v) || 0;
 
-/**
- * Obtiene el tipo de cambio actualizado para normalizar a Pesos Argentinos (ARS)
- */
 async function obtenerTipoCambio(currency) {
     if (currency === "ARS") return 1;
 
     const now = Date.now();
-    // Cache de 1 hora
     if (exchangeCache.currency === currency && now - exchangeCache.timestamp < 3600000) {
         return exchangeCache.rate;
     }
@@ -72,9 +66,6 @@ async function obtenerTipoCambio(currency) {
 // 3. DETECCIÓN DE OBJETIVOS (ANTI-BLOQUEOS DE META)
 //////////////////////////////////////////////////////////
 
-/**
- * Cruza múltiples campos para entender qué está midiendo realmente la campaña
- */
 function detectarObjetivo(c) {
     const objective = (c.objective || "").toUpperCase();
     const optGoal = (c.optimization_goal || "").toUpperCase();
@@ -83,7 +74,6 @@ function detectarObjetivo(c) {
     const convEvent = (c.conversion_event || "").toUpperCase();
     const campName = (c.name || "").toUpperCase(); 
 
-    // Detección de Mensajes (WSP / IG / FB)
     if (
         convLocation.includes("MESSAGE") ||
         convLocation.includes("WHATSAPP") ||
@@ -97,23 +87,18 @@ function detectarObjetivo(c) {
         campName.includes("WHATSAPP")
     ) return "message";
 
-    // Detección de Leads (Formularios)
     if (objective.includes("LEAD") || optGoal.includes("LEAD") || campName.includes("LEAD"))
         return "lead";
 
-    // Detección de Compras (E-commerce)
     if (convEvent.includes("PURCHASE") || optGoal.includes("PURCHASE") || campName.includes("COMPRA"))
         return "purchase";
 
-    // Detección de Carritos
     if (convEvent.includes("ADD_TO_CART") || optGoal.includes("ADD_TO_CART") || campName.includes("CARRITO"))
         return "cart";
 
-    // Detección de Visitas al Perfil
     if (objective.includes("TRAFFIC") && perfGoal.includes("PROFILE"))
         return "profile_visit";
 
-    // Detección de Landing Page Views
     if (objective.includes("TRAFFIC") || objective.includes("OUTCOME_TRAFFIC") || campName.includes("TRAFICO"))
         return "lpv";
 
@@ -133,9 +118,6 @@ function evaluarNivelCosto(objetivo, costoARS) {
 // 4. ANÁLISIS DEMOGRÁFICO Y GEOGRÁFICO (BREAKDOWNS)
 //////////////////////////////////////////////////////////
 
-/**
- * Procesa los datos crudos de Meta para encontrar los segmentos ganadores
- */
 function analizarPublicoPorCampaña(data) {
     const campañas = data.campañas_detalle || [];
 
@@ -184,7 +166,7 @@ function analizarPublicoPorCampaña(data) {
 
 async function calcularScoreMatematico(data, currency) {
     const rate = await obtenerTipoCambio(currency);
-    let score = 5.5; // Punto de partida neutral-positivo
+    let score = 5.5; 
 
     for (const c of data.campañas_detalle || []) {
         const spend = n(c.spend);
@@ -201,20 +183,16 @@ async function calcularScoreMatematico(data, currency) {
         const costoARS = resultados > 0 ? (spend / resultados) * rate : null;
         const nivel = evaluarNivelCosto(objetivo, costoARS);
 
-        // Ajuste de Score por Performance
         if (nivel === "success") score += 0.8;
         if (nivel === "warning") score -= 0.4;
         if (nivel === "danger") score -= 1.2;
 
-        // Penalización por falta de resultados
         if (spend > 0 && resultados === 0) score -= 1.8;
 
-        // Ajuste por fatiga de anuncios (Frecuencia)
         const freq = n(c.freq);
         if (freq > 3.0 && freq <= 4.5) score -= 0.5;
         if (freq > 4.5) score -= 1.3;
 
-        // Bonificación por ROAS (si aplica)
         if (objetivo === "purchase" && spend > 0) {
             const roas = n(c.val) / spend;
             if (roas >= 2.5) score += 1.0;
@@ -239,6 +217,9 @@ async function analizarConIA(data, currency) {
         objetivo: detectarObjetivo(c),
         inversion: n(c.spend),
         frecuencia: n(c.freq),
+        ctr: n(c.ctr_meta),
+        clics: n(c.clicks),
+        resultados: n(c.resultados_obj),
         status: c.effective_status
     }));
 
@@ -260,8 +241,14 @@ REGLAS DE URGENCIA (Escala de 10 niveles):
 - 8.1 a 9.0: "ARRIBA DEL PROMEDIO"
 - 9.1 a 10.0: "CASI PERFECTO (Sos un crack)"
 
+REGLA CRÍTICA DE INTERPRETACIÓN DE FRECUENCIA:
+- 1.0 a 2.0: Frecuencia IDEAL. No menciones saturación.
+- 2.1 a 3.0: Frecuencia aceptable.
+- Mayor a 3.5: Riesgo de saturación.
+- ¡ERROR A EVITAR!: No digas que una frecuencia de 1.13 o similar es "alta" o "está saturando". Eso es una frecuencia perfecta.
+
 TU TAREA:
-1. Explica la Estrategia Global: Describe la arquitectura de la cuenta (ej. "Estamos operando un embudo de captación activa...").
+1. Explica la Estrategia Global: Describe la arquitectura de la cuenta.
 2. Explica el Rol de las Campañas: Define para qué sirve cada una en el ecosistema de ventas del cliente.
 3. Foco en Negocios: Habla de "eficiencia del capital", "rentabilidad" y "protección de la inversión".
 4. Tono: Seguro, profesional y directo.
@@ -272,7 +259,7 @@ Devuelve UNICAMENTE JSON válido:
   "urgencia": "string (según la escala)",
   "diagnostico_general": "Narrativa estratégica global dirigida al dueño del negocio...",
   "analisis_campañas": [
-    { "id": "string", "feedback_ia": "Análisis táctico/estratégico del rol de esta campaña", "status_ia": "success/warning/danger" }
+    { "id": "string", "feedback_ia": "Análisis táctico del rol de esta campaña. Se preciso con los números.", "status_ia": "success/warning/danger" }
   ],
   "plan_accion": ["Paso 1", "Paso 2"],
   "insight_publico": "Breve resumen ejecutivo sobre el comportamiento del público detectado"
@@ -285,9 +272,9 @@ ${JSON.stringify(campañasSimplificadas, null, 2)}
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            temperature: 0.4,
+            temperature: 0.3, // Temperatura baja para mayor precisión numérica
             messages: [
-                { role: "system", content: "Eres Luciano Federico Juarez. Experto en explicar estrategias de Meta Ads en lenguaje de negocios." },
+                { role: "system", content: "Eres Luciano Federico Juarez. Experto en explicar estrategias de Meta Ads en lenguaje de negocios. Eres extremadamente preciso con los rangos numéricos." },
                 { role: "user", content: prompt }
             ]
         });
