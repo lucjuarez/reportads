@@ -4,14 +4,14 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import fetch from "node-fetch";
 
-// Carga de variables de entorno
+// Carga de variables de entorno para seguridad de API Keys
 dotenv.config();
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Inicialización de OpenAI
+// Inicialización de la instancia de OpenAI
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
@@ -36,7 +36,7 @@ let exchangeCache = {
 };
 
 //////////////////////////////////////////////////////////
-// 2. UTILIDADES MATEMÁTICAS Y DIVISAS
+// 2. UTILIDADES MATEMÁTICAS Y GESTIÓN DE DIVISAS
 //////////////////////////////////////////////////////////
 
 const n = (v) => Number(v) || 0;
@@ -57,13 +57,13 @@ async function obtenerTipoCambio(currency) {
         exchangeCache = { rate, currency, timestamp: now };
         return rate;
     } catch (e) {
-        console.log("⚠️ Error en exchange rate, usando paridad 1:1");
+        console.log("⚠️ Error en API de divisas, usando paridad 1:1");
         return 1;
     }
 }
 
 //////////////////////////////////////////////////////////
-// 3. DETECCIÓN DE OBJETIVOS (ANTI-BLOQUEOS DE META)
+// 3. DETECCIÓN DE OBJETIVOS (LÓGICA ESTRATÉGICA)
 //////////////////////////////////////////////////////////
 
 function detectarObjetivo(c) {
@@ -105,7 +105,7 @@ function detectarObjetivo(c) {
     return "unknown";
 }
 
-function evaluarNivelCosto(objetivo, costoARS) {
+function evaluarCalidadCosto(objetivo, costoARS) {
     const ref = BENCHMARK_ARS[objetivo];
     if (!ref || costoARS === null) return "neutral";
 
@@ -115,7 +115,7 @@ function evaluarNivelCosto(objetivo, costoARS) {
 }
 
 //////////////////////////////////////////////////////////
-// 4. ANÁLISIS DEMOGRÁFICO Y GEOGRÁFICO (BREAKDOWNS)
+// 4. ANÁLISIS DE PÚBLICOS (EDAD, GÉNERO, GEOGRAFÍA)
 //////////////////////////////////////////////////////////
 
 function analizarPublicoPorCampaña(data) {
@@ -129,10 +129,8 @@ function analizarPublicoPorCampaña(data) {
 
         (c.breakdowns || []).forEach(b => {
             const resultados = n(b.resultados);
-
             if (b.age) edades[b.age] = (edades[b.age] || 0) + resultados;
             if (b.gender) generos[b.gender] = (generos[b.gender] || 0) + resultados;
-
             if (b.country) {
                 paises[b.country] = (paises[b.country] || 0) + resultados;
                 if (!ciudadesPorPais[b.country]) ciudadesPorPais[b.country] = {};
@@ -144,7 +142,6 @@ function analizarPublicoPorCampaña(data) {
 
         const topPaises = Object.entries(paises).sort((a,b)=>b[1]-a[1]).slice(0,3).map(p=>p[0]);
         const topCiudadesPorPais = {};
-
         topPaises.forEach(pais => {
             const ciudades = ciudadesPorPais[pais] || {};
             topCiudadesPorPais[pais] = Object.entries(ciudades).sort((a,b)=>b[1]-a[1]).slice(0,3).map(ci=>ci[0]);
@@ -181,7 +178,7 @@ async function calcularScoreMatematico(data, currency) {
         else resultados = n(c.clicks);
 
         const costoARS = resultados > 0 ? (spend / resultados) * rate : null;
-        const nivel = evaluarNivelCosto(objetivo, costoARS);
+        const nivel = evaluarCalidadCosto(objetivo, costoARS);
 
         if (nivel === "success") score += 0.8;
         if (nivel === "warning") score -= 0.4;
@@ -189,23 +186,18 @@ async function calcularScoreMatematico(data, currency) {
 
         if (spend > 0 && resultados === 0) score -= 1.8;
 
+        // NUEVA LÓGICA DE FRECUENCIA
         const freq = n(c.freq);
-        if (freq > 2.0 && freq <= 2.5) score -= 0.3; 
-        if (freq > 2.5 && freq <= 3.0) score -= 0.8; 
-        if (freq > 3.0) score -= 1.5; 
-
-        if (objetivo === "purchase" && spend > 0) {
-            const roas = n(c.val) / spend;
-            if (roas >= 2.5) score += 1.0;
-            if (roas < 1.0) score -= 1.5;
-        }
+        if (freq > 2.0 && freq <= 2.5) score -= 0.5; // Síntomas
+        if (freq > 2.5 && freq <= 3.0) score -= 1.2; // Alerta
+        if (freq > 3.0) score -= 2.0; // Alta
     }
 
     return Number(Math.min(10, Math.max(0, score)).toFixed(1));
 }
 
 //////////////////////////////////////////////////////////
-// 6. MOTOR IA: DIAGNÓSTICO ESTRATÉGICO (SIN OPTIMIZACIÓN)
+// 6. MOTOR IA: ESTRATEGIA Y PROPÓSITO (MÁXIMA CALIDAD)
 //////////////////////////////////////////////////////////
 
 async function analizarConIA(data, currency) {
@@ -227,70 +219,67 @@ async function analizarConIA(data, currency) {
 
     const prompt = `
 Actúa como Luciano Federico Juarez, Director de Estrategia Senior. 
-Tu misión es EXPLICAR la lógica y el propósito detrás de la inversión publicitaria al dueño del negocio.
+Tu misión es EXPLICAR la lógica estratégica y el propósito de la cuenta al dueño del negocio.
 
 PUNTAJE GLOBAL: ${scoreBase}
 
-REGLAS DE ORO PARA EL DIAGNÓSTICO:
-1. EXPLICACIÓN ESTRATÉGICA PURA: No quiero optimizaciones, no quiero soluciones, no quiero consejos de "deberías mejorar X". Quiero que expliques QUÉ se está haciendo y PARA QUÉ.
-2. EL PROPÓSITO DE MENSAJES: Si una campaña es de Mensajes, el objetivo es CONSEGUIR MENSAJES y conversaciones directas para vender. Olvida la palabra "Interacción" de Meta; el cliente quiere prospectos hablando con él.
-3. ARQUITECTURA DE CUENTA: Explica la estrategia global. Cómo las campañas están configuradas como un sistema para lograr los objetivos de negocio.
-4. LENGUAJE DE NEGOCIOS: Habla de "intención de compra", "flujo de prospectos", "protección del capital" y "arquitectura de conversión".
+ESCALA DE SCORE (OBLIGATORIA):
+- 0.0 a 1.0: "ALERTA MÁXIMA"
+- 1.1 a 2.0: "CUIDADO"
+- 2.1 a 3.0: "CRÍTICO"
+- 3.1 a 4.0: "NECESITA MEJORAR"
+- 4.1 a 5.0: "OPTIMIZAR"
+- 5.1 a 6.0: "MEJORAR RENDIMIENTO"
+- 6.1 a 7.0: "ESTABLE"
+- 7.1 a 8.0: "VAS POR BUEN CAMINO"
+- 8.1 a 9.0: "ARRIBA DEL PROMEDIO"
+- 9.1 a 10.0: "CASI PERFECTO"
 
-REGLA DE FRECUENCIA:
-- 1.0 a 2.0: Frecuencia IDEAL. Elogia la frescura del anuncio y el alcance a público nuevo. Jamás menciones saturación.
+REGLAS DE INTERPRETACIÓN DE FRECUENCIA (INNEGOCIABLES):
+- 1.0 a 2.0: "Aceptable" (Ideal).
+- 2.0 a 2.5: "Mostrando síntomas de ir al camino de la saturación".
+- 2.5 a 3.0: "ALERTA". (Si es 2.75, es ALERTA, jamás aceptable).
+- > 3.0: "Alta saturación".
 
-Devuelve UNICAMENTE JSON válido:
+REGLAS ESTRATÉGICAS:
+1. NO OPTIMIZACIÓN: Prohibido dar consejos, soluciones o decir "deberías hacer X". Solo explica QUÉ se está haciendo y PARA QUÉ.
+2. PROPÓSITO DE MENSAJES: Si la campaña es de Mensajes, explica que el fin es CONSEGUIR MENSAJES y conversaciones para vender. Ignora si Meta lo llama "Interacción".
+3. LENGUAJE: Usa "arquitectura de cuenta", "eficiencia de capital" e "intención de compra".
+
+Devuelve JSON:
 {
   "score": ${scoreBase},
-  "urgencia": "string (según la escala de 10 niveles)",
-  "diagnostico_general": "Explicación profunda de la arquitectura estratégica global y el propósito de la cuenta en este periodo.",
+  "urgencia": "string (según la escala de 10 niveles arriba)",
+  "diagnostico_general": "Narrativa sobre la arquitectura estratégica global de la cuenta.",
   "analisis_campañas": [
     { 
       "id": "string", 
-      "feedback_ia": "Explicación del propósito estratégico de esta campaña y qué está logrando en relación a su objetivo real (ej. captar mensajes). Sin dar consejos de optimización.", 
+      "feedback_ia": "Explica el propósito estratégico de esta campaña y qué está logrando respecto a su fin real (ej. captar mensajes). Sigue las reglas de frecuencia estrictamente.", 
       "status_ia": "success/warning/danger" 
     }
   ],
-  "insight_publico": "Análisis ejecutivo del comportamiento y la respuesta de la audiencia ante la estrategia."
+  "insight_publico": "Análisis ejecutivo del comportamiento de la audiencia."
 }
 
-Datos de las campañas:
-${JSON.stringify(campañasSimplificadas, null, 2)}
+DATOS: ${JSON.stringify(campañasSimplificadas, null, 2)}
 `;
 
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            temperature: 0.2, // Bajamos más la temperatura para evitar consejos "creativos"
+            temperature: 0.2, 
             messages: [
-                { role: "system", content: "Eres Luciano Federico Juarez. No das consejos ni soluciones. Eres un estratega que explica el propósito y la arquitectura de la cuenta al cliente." },
+                { role: "system", content: "Eres Luciano Federico Juarez. No das consejos. Explicas el propósito y la arquitectura de la cuenta." },
                 { role: "user", content: prompt }
             ]
         });
 
-        const aiResponse = JSON.parse(response.choices[0].message.content.replace(/```json|```/g, ""));
-
-        return {
-            ...aiResponse,
-            analisis_publico_por_campaña: publicoData
-        };
-
+        const aiRes = JSON.parse(response.choices[0].message.content.replace(/```json|```/g, ""));
+        return { ...aiRes, analisis_publico_por_campaña: publicoData };
     } catch (error) {
-        console.error("❌ Error IA:", error);
-        return {
-            score: scoreBase,
-            urgencia: "ESTABLE",
-            diagnostico_general: "Análisis estratégico de la arquitectura de cuenta finalizado.",
-            analisis_campañas: [],
-            analisis_publico_por_campaña: publicoData
-        };
+        return { score: scoreBase, urgencia: "ESTABLE", diagnostico_general: "Error en motor estratégico.", analisis_campañas: [], analisis_publico_por_campaña: publicoData };
     }
 }
-
-//////////////////////////////////////////////////////////
-// 7. ENDPOINT Y SERVIDOR
-//////////////////////////////////////////////////////////
 
 app.post("/analizar", async (req, res) => {
     try {
@@ -298,12 +287,11 @@ app.post("/analizar", async (req, res) => {
         const resultado = await analizarConIA(req.body, currency);
         res.json(resultado);
     } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: "Error en el motor estratégico" });
+        res.status(500).json({ error: "Error interno" });
     }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-    console.log(`🚀 ReportAds Auditor Senior activo en puerto ${PORT}`);
+    console.log(`🚀 ReportAds Master Auditor activo en puerto ${PORT}`);
 });
