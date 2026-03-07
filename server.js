@@ -189,9 +189,11 @@ async function calcularScoreMatematico(data, currency) {
 
         if (spend > 0 && resultados === 0) score -= 1.8;
 
+        // Lógica de Frecuencia Actualizada
         const freq = n(c.freq);
-        if (freq > 3.0 && freq <= 4.5) score -= 0.5;
-        if (freq > 4.5) score -= 1.3;
+        if (freq > 2.0 && freq <= 2.5) score -= 0.3; // Síntomas de saturación
+        if (freq > 2.5 && freq <= 3.0) score -= 0.8; // Alerta
+        if (freq > 3.0) score -= 1.5; // Alta saturación
 
         if (objetivo === "purchase" && spend > 0) {
             const roas = n(c.val) / spend;
@@ -241,11 +243,12 @@ REGLAS DE URGENCIA (Escala de 10 niveles):
 - 8.1 a 9.0: "ARRIBA DEL PROMEDIO"
 - 9.1 a 10.0: "CASI PERFECTO (Sos un crack)"
 
-REGLA CRÍTICA DE INTERPRETACIÓN DE FRECUENCIA:
-- 1.0 a 2.0: Frecuencia IDEAL. No menciones saturación.
-- 2.1 a 3.0: Frecuencia aceptable.
-- Mayor a 3.5: Riesgo de saturación.
-- ¡ERROR A EVITAR!: No digas que una frecuencia de 1.13 o similar es "alta" o "está saturando". Eso es una frecuencia perfecta.
+REGLA CRÍTICA DE INTERPRETACIÓN DE FRECUENCIA (Rangos Actualizados):
+- 1.0 a 2.0: "Aceptable". Es una frecuencia sana.
+- 2.0 a 2.5: "Mostrando síntomas de ir al camino de la saturación". Sugiere monitoreo.
+- 2.5 a 3.0: "Alerta". El público está viendo demasiado el anuncio.
+- Mayor a 3.0: "Alta". Saturación crítica.
+- ¡IMPORTANTE!: Si la frecuencia está entre 1.0 y 2.0, elogia la frescura del anuncio. Jamás menciones saturación en este rango.
 
 TU TAREA:
 1. Explica la Estrategia Global: Describe la arquitectura de la cuenta.
@@ -259,7 +262,7 @@ Devuelve UNICAMENTE JSON válido:
   "urgencia": "string (según la escala)",
   "diagnostico_general": "Narrativa estratégica global dirigida al dueño del negocio...",
   "analisis_campañas": [
-    { "id": "string", "feedback_ia": "Análisis táctico del rol de esta campaña. Se preciso con los números.", "status_ia": "success/warning/danger" }
+    { "id": "string", "feedback_ia": "Análisis táctico del rol de esta campaña. Se preciso con los números y usa las etiquetas de frecuencia correctas.", "status_ia": "success/warning/danger" }
   ],
   "plan_accion": ["Paso 1", "Paso 2"],
   "insight_publico": "Breve resumen ejecutivo sobre el comportamiento del público detectado"
@@ -272,9 +275,9 @@ ${JSON.stringify(campañasSimplificadas, null, 2)}
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            temperature: 0.3, // Temperatura baja para mayor precisión numérica
+            temperature: 0.3, 
             messages: [
-                { role: "system", content: "Eres Luciano Federico Juarez. Experto en explicar estrategias de Meta Ads en lenguaje de negocios. Eres extremadamente preciso con los rangos numéricos." },
+                { role: "system", content: "Eres Luciano Federico Juarez. Experto en explicar estrategias de Meta Ads en lenguaje de negocios. Eres extremadamente preciso con los rangos numéricos y sigues las reglas de frecuencia al pie de la letra." },
                 { role: "user", content: prompt }
             ]
         });
