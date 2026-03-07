@@ -215,51 +215,49 @@ async function analizarConIA(data, currency) {
     const campañasSimplificadas = (data.campañas_detalle || []).map(c => ({
         id: c.id,
         name: c.name,
-        objetivo: detectarObjetivo(c),
+        objetivo_detectado: detectarObjetivo(c),
         inversion: n(c.spend),
         frecuencia: n(c.freq),
         ctr: n(c.ctr_meta),
         clics: n(c.clicks),
-        resultados_meta: n(c.resultados_obj),
+        mensajes: n(c.msg),
+        leads: n(c.leads),
+        compras: n(c.pur),
+        lpv: n(c.lpv),
         status: c.effective_status,
         roas: n(c.roas)
     }));
 
     const prompt = `
 Actúa como Luciano Federico Juarez, Director de Estrategia y experto en Performance Marketing.
-Tu misión es entregar un Diagnóstico Estratégico de ALTO NIVEL al dueño del negocio que leerá este reporte.
+Tu misión es entregar un Diagnóstico Estratégico de ALTO NIVEL para el dueño del negocio.
 
-PUNTAJE OBTENIDO: ${scoreBase}
+PUNTAJE GLOBAL DE LA CUENTA: ${scoreBase}
 
 REGLAS DE URGENCIA:
 - 0.0 a 1.0: "ALERTA MÁXIMA" | 1.1 a 2.0: "CUIDADO" | 2.1 a 3.0: "CRÍTICO" | 3.1 a 4.0: "NECESITA MEJORAR" | 4.1 a 5.0: "OPTIMIZAR"
 - 5.1 a 6.0: "MEJORAR RENDIMIENTO" | 6.1 a 7.0: "ESTABLE" | 7.1 a 8.0: "VAS POR BUEN CAMINO" | 8.1 a 9.0: "ARRIBA DEL PROMEDIO" | 9.1 a 10.0: "CASI PERFECTO (Sos un crack)"
 
-REGLAS DE FRECUENCIA (INNEGOCIABLES):
-- 1.0 a 2.0: "Aceptable". Es una frecuencia sana e ideal. JAMÁS digas que es alta o que satura.
-- 2.0 a 2.5: "Mostrando síntomas de saturación".
-- 2.5 a 3.0: "Alerta de Saturación".
-- Mayor a 3.0: "Alta Saturación".
-
 INSTRUCCIONES PARA EL DIAGNÓSTICO GLOBAL:
-1. ARQUITECTURA DE CUENTA: Explica el ecosistema. Cómo las campañas se ayudan entre sí (ej. "La campaña de tráfico alimenta a la de mensajes" o "Estamos en una etapa de pura captación de demanda").
-2. FOCO EN EL CLIENTE: Habla de rentabilidad, eficiencia de capital y flujo de caja. Que el cliente sienta que controlas su negocio, no solo sus clics.
+1. ARQUITECTURA DE CUENTA: Explica el ecosistema. Cómo las campañas se ayudan entre sí (ej. "La campaña de mensajes está diseñada para captar la demanda inmediata mientras que la de tráfico alimenta el reconocimiento").
+2. FOCO EN OBJETIVOS: No mezcles conceptos. Si no hay campañas de e-commerce, NO hables de ROAS. Habla de "Flujo de prospectos", "Volumen de conversaciones" y "Costo por adquisición de contacto".
+3. LENGUAJE EJECUTIVO: El cliente debe entender que hay un Plan Maestro para proteger su capital y aumentar su rentabilidad.
 
 INSTRUCCIONES PARA EL ANÁLISIS DE CADA CAMPAÑA:
-1. OBJETIVO PRIMARIO: El análisis DEBE empezar evaluando si la campaña está cumpliendo su objetivo (ej. si es de Compras, habla de Compras primero). 
-2. MÉTRICAS SECUNDARIAS: Después de evaluar el objetivo, menciona Frecuencia, CTR o clics para explicar el porqué del resultado.
-3. CONTEXTO: Si una campaña tiene frecuencia 1.15 y pocos resultados, NO es saturación; busca el problema en el CTR o la Oferta.
+1. PRIORIDAD ABSOLUTA AL OBJETIVO: Empieza cada párrafo nombrando el objetivo (ej: "Esta campaña de Mensajes está logrando..."). 
+2. REGLA ANTI-ERROR: PROHIBIDO hablar de ROAS si el objetivo es 'MESSAGE', 'LEAD' o 'TRAFFIC'. El ROAS solo existe para 'PURCHASE'.
+3. ANÁLISIS TÁCTICO: Usa la frecuencia (rango 1.0-2.0 es ideal, no digas que satura) y el CTR para explicar si el anuncio está gustando o si hay que cambiar la pieza creativa.
 
 Devuelve UNICAMENTE JSON válido:
 {
   "score": ${scoreBase},
   "urgencia": "string (según la escala)",
-  "diagnostico_general": "Narrativa detallada de la arquitectura global y salud del negocio...",
+  "diagnostico_general": "Narrativa detallada sobre la arquitectura estratégica global de la cuenta enfocada en sus objetivos reales.",
   "analisis_campañas": [
-    { "id": "string", "feedback_ia": "Análisis prioritario por objetivo + diagnóstico táctico secundario", "status_ia": "success/warning/danger" }
+    { "id": "string", "feedback_ia": "Análisis enfocado PRIMERO en el objetivo (Mensajes/Leads/etc) y luego en métricas de apoyo. Sin mencionar ROAS en campañas de mensajes.", "status_ia": "success/warning/danger" }
   ],
-  "plan_accion": ["Paso 1 estratégico", "Paso 2 estratégico"],
-  "insight_publico": "Análisis ejecutivo del comportamiento del público"
+  "plan_accion": ["Acción estratégica 1", "Acción estratégica 2"],
+  "insight_publico": "Análisis ejecutivo de la audiencia ganadora"
 }
 
 Datos de las campañas:
@@ -271,7 +269,7 @@ ${JSON.stringify(campañasSimplificadas, null, 2)}
             model: "gpt-4o-mini",
             temperature: 0.3, 
             messages: [
-                { role: "system", content: "Eres Luciano Federico Juarez. Tu diagnóstico debe ser descriptivo, estratégico y centrado en los objetivos de negocio del cliente." },
+                { role: "system", content: "Eres Luciano Federico Juarez. Tu diagnóstico es estratégico, nunca técnico-confuso. Priorizas el objetivo de negocio por sobre todo." },
                 { role: "user", content: prompt }
             ]
         });
@@ -288,9 +286,9 @@ ${JSON.stringify(campañasSimplificadas, null, 2)}
         return {
             score: scoreBase,
             urgencia: "ESTABLE",
-            diagnostico_general: "Análisis estratégico disponible. Revisar métricas individuales.",
+            diagnostico_general: "Análisis estratégico disponible basado en objetivos de conversión.",
             analisis_campañas: [],
-            plan_accion: ["Monitorear objetivos de conversión"],
+            plan_accion: ["Revisar cumplimiento de objetivos de campaña"],
             analisis_publico_por_campaña: publicoData
         };
     }
@@ -307,7 +305,7 @@ app.post("/analizar", async (req, res) => {
         res.json(resultado);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: "Error en el motor estratégico" });
+        res.status(500).json({ error: "Fallo en el motor estratégico" });
     }
 });
 
