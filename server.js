@@ -205,7 +205,7 @@ async function calcularScoreMatematico(data, currency) {
 }
 
 //////////////////////////////////////////////////////////
-// 6. MOTOR IA: DIAGNÓSTICO ESTRATÉGICO PARA CLIENTES
+// 6. MOTOR IA: DIAGNÓSTICO ESTRATÉGICO (SIN OPTIMIZACIÓN)
 //////////////////////////////////////////////////////////
 
 async function analizarConIA(data, currency) {
@@ -219,45 +219,40 @@ async function analizarConIA(data, currency) {
         inversion: n(c.spend),
         frecuencia: n(c.freq),
         ctr: n(c.ctr_meta),
-        clics: n(c.clicks),
         mensajes: n(c.msg),
         leads: n(c.leads),
         compras: n(c.pur),
-        lpv: n(c.lpv),
-        status: c.effective_status,
-        roas: n(c.roas)
+        status: c.effective_status
     }));
 
     const prompt = `
-Actúa como Luciano Federico Juarez, Director de Estrategia y experto en Performance Marketing.
-Tu misión es entregar un Diagnóstico Estratégico de ALTO NIVEL para el dueño del negocio.
+Actúa como Luciano Federico Juarez, Director de Estrategia Senior. 
+Tu misión es EXPLICAR la lógica y el propósito detrás de la inversión publicitaria al dueño del negocio.
 
-PUNTAJE GLOBAL DE LA CUENTA: ${scoreBase}
+PUNTAJE GLOBAL: ${scoreBase}
 
-REGLAS DE URGENCIA:
-- 0.0 a 1.0: "ALERTA MÁXIMA" | 1.1 a 2.0: "CUIDADO" | 2.1 a 3.0: "CRÍTICO" | 3.1 a 4.0: "NECESITA MEJORAR" | 4.1 a 5.0: "OPTIMIZAR"
-- 5.1 a 6.0: "MEJORAR RENDIMIENTO" | 6.1 a 7.0: "ESTABLE" | 7.1 a 8.0: "VAS POR BUEN CAMINO" | 8.1 a 9.0: "ARRIBA DEL PROMEDIO" | 9.1 a 10.0: "CASI PERFECTO (Sos un crack)"
+REGLAS DE ORO PARA EL DIAGNÓSTICO:
+1. EXPLICACIÓN ESTRATÉGICA PURA: No quiero optimizaciones, no quiero soluciones, no quiero consejos de "deberías mejorar X". Quiero que expliques QUÉ se está haciendo y PARA QUÉ.
+2. EL PROPÓSITO DE MENSAJES: Si una campaña es de Mensajes, el objetivo es CONSEGUIR MENSAJES y conversaciones directas para vender. Olvida la palabra "Interacción" de Meta; el cliente quiere prospectos hablando con él.
+3. ARQUITECTURA DE CUENTA: Explica la estrategia global. Cómo las campañas están configuradas como un sistema para lograr los objetivos de negocio.
+4. LENGUAJE DE NEGOCIOS: Habla de "intención de compra", "flujo de prospectos", "protección del capital" y "arquitectura de conversión".
 
-INSTRUCCIONES PARA EL DIAGNÓSTICO GLOBAL:
-1. ARQUITECTURA DE CUENTA: Explica el ecosistema. Cómo las campañas se ayudan entre sí (ej. "La campaña de mensajes está diseñada para captar la demanda inmediata mientras que la de tráfico alimenta el reconocimiento").
-2. FOCO EN OBJETIVOS: No mezcles conceptos. Si no hay campañas de e-commerce, NO hables de ROAS. Habla de "Flujo de prospectos", "Volumen de conversaciones" y "Costo por adquisición de contacto".
-3. LENGUAJE EJECUTIVO: El cliente debe entender que hay un Plan Maestro para proteger su capital y aumentar su rentabilidad.
-
-INSTRUCCIONES PARA EL ANÁLISIS DE CADA CAMPAÑA:
-1. PRIORIDAD ABSOLUTA AL OBJETIVO: Empieza cada párrafo nombrando el objetivo (ej: "Esta campaña de Mensajes está logrando..."). 
-2. REGLA ANTI-ERROR: PROHIBIDO hablar de ROAS si el objetivo es 'MESSAGE', 'LEAD' o 'TRAFFIC'. El ROAS solo existe para 'PURCHASE'.
-3. ANÁLISIS TÁCTICO: Usa la frecuencia (rango 1.0-2.0 es ideal, no digas que satura) y el CTR para explicar si el anuncio está gustando o si hay que cambiar la pieza creativa.
+REGLA DE FRECUENCIA:
+- 1.0 a 2.0: Frecuencia IDEAL. Elogia la frescura del anuncio y el alcance a público nuevo. Jamás menciones saturación.
 
 Devuelve UNICAMENTE JSON válido:
 {
   "score": ${scoreBase},
-  "urgencia": "string (según la escala)",
-  "diagnostico_general": "Narrativa detallada sobre la arquitectura estratégica global de la cuenta enfocada en sus objetivos reales.",
+  "urgencia": "string (según la escala de 10 niveles)",
+  "diagnostico_general": "Explicación profunda de la arquitectura estratégica global y el propósito de la cuenta en este periodo.",
   "analisis_campañas": [
-    { "id": "string", "feedback_ia": "Análisis enfocado PRIMERO en el objetivo (Mensajes/Leads/etc) y luego en métricas de apoyo. Sin mencionar ROAS en campañas de mensajes.", "status_ia": "success/warning/danger" }
+    { 
+      "id": "string", 
+      "feedback_ia": "Explicación del propósito estratégico de esta campaña y qué está logrando en relación a su objetivo real (ej. captar mensajes). Sin dar consejos de optimización.", 
+      "status_ia": "success/warning/danger" 
+    }
   ],
-  "plan_accion": ["Acción estratégica 1", "Acción estratégica 2"],
-  "insight_publico": "Análisis ejecutivo de la audiencia ganadora"
+  "insight_publico": "Análisis ejecutivo del comportamiento y la respuesta de la audiencia ante la estrategia."
 }
 
 Datos de las campañas:
@@ -267,9 +262,9 @@ ${JSON.stringify(campañasSimplificadas, null, 2)}
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            temperature: 0.3, 
+            temperature: 0.2, // Bajamos más la temperatura para evitar consejos "creativos"
             messages: [
-                { role: "system", content: "Eres Luciano Federico Juarez. Tu diagnóstico es estratégico, nunca técnico-confuso. Priorizas el objetivo de negocio por sobre todo." },
+                { role: "system", content: "Eres Luciano Federico Juarez. No das consejos ni soluciones. Eres un estratega que explica el propósito y la arquitectura de la cuenta al cliente." },
                 { role: "user", content: prompt }
             ]
         });
@@ -286,9 +281,8 @@ ${JSON.stringify(campañasSimplificadas, null, 2)}
         return {
             score: scoreBase,
             urgencia: "ESTABLE",
-            diagnostico_general: "Análisis estratégico disponible basado en objetivos de conversión.",
+            diagnostico_general: "Análisis estratégico de la arquitectura de cuenta finalizado.",
             analisis_campañas: [],
-            plan_accion: ["Revisar cumplimiento de objetivos de campaña"],
             analisis_publico_por_campaña: publicoData
         };
     }
@@ -305,7 +299,7 @@ app.post("/analizar", async (req, res) => {
         res.json(resultado);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: "Fallo en el motor estratégico" });
+        res.status(500).json({ error: "Error en el motor estratégico" });
     }
 });
 
