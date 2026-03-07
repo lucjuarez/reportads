@@ -189,11 +189,10 @@ async function calcularScoreMatematico(data, currency) {
 
         if (spend > 0 && resultados === 0) score -= 1.8;
 
-        // Lógica de Frecuencia Actualizada
         const freq = n(c.freq);
-        if (freq > 2.0 && freq <= 2.5) score -= 0.3; // Síntomas de saturación
-        if (freq > 2.5 && freq <= 3.0) score -= 0.8; // Alerta
-        if (freq > 3.0) score -= 1.5; // Alta saturación
+        if (freq > 2.0 && freq <= 2.5) score -= 0.3; 
+        if (freq > 2.5 && freq <= 3.0) score -= 0.8; 
+        if (freq > 3.0) score -= 1.5; 
 
         if (objetivo === "purchase" && spend > 0) {
             const roas = n(c.val) / spend;
@@ -221,51 +220,46 @@ async function analizarConIA(data, currency) {
         frecuencia: n(c.freq),
         ctr: n(c.ctr_meta),
         clics: n(c.clicks),
-        resultados: n(c.resultados_obj),
-        status: c.effective_status
+        resultados_meta: n(c.resultados_obj),
+        status: c.effective_status,
+        roas: n(c.roas)
     }));
 
     const prompt = `
 Actúa como Luciano Federico Juarez, Director de Estrategia y experto en Performance Marketing.
-Tu misión es entregar un Diagnóstico Estratégico al dueño del negocio que leerá este reporte.
+Tu misión es entregar un Diagnóstico Estratégico de ALTO NIVEL al dueño del negocio que leerá este reporte.
 
 PUNTAJE OBTENIDO: ${scoreBase}
 
-REGLAS DE URGENCIA (Escala de 10 niveles):
-- 0.0 a 1.0: "ALERTA MÁXIMA"
-- 1.1 a 2.0: "CUIDADO"
-- 2.1 a 3.0: "CRÍTICO"
-- 3.1 a 4.0: "NECESITA MEJORAR"
-- 4.1 a 5.0: "OPTIMIZAR"
-- 5.1 a 6.0: "MEJORAR RENDIMIENTO"
-- 6.1 a 7.0: "ESTABLE"
-- 7.1 a 8.0: "VAS POR BUEN CAMINO"
-- 8.1 a 9.0: "ARRIBA DEL PROMEDIO"
-- 9.1 a 10.0: "CASI PERFECTO (Sos un crack)"
+REGLAS DE URGENCIA:
+- 0.0 a 1.0: "ALERTA MÁXIMA" | 1.1 a 2.0: "CUIDADO" | 2.1 a 3.0: "CRÍTICO" | 3.1 a 4.0: "NECESITA MEJORAR" | 4.1 a 5.0: "OPTIMIZAR"
+- 5.1 a 6.0: "MEJORAR RENDIMIENTO" | 6.1 a 7.0: "ESTABLE" | 7.1 a 8.0: "VAS POR BUEN CAMINO" | 8.1 a 9.0: "ARRIBA DEL PROMEDIO" | 9.1 a 10.0: "CASI PERFECTO (Sos un crack)"
 
-REGLA CRÍTICA DE INTERPRETACIÓN DE FRECUENCIA (Rangos Actualizados):
-- 1.0 a 2.0: "Aceptable". Es una frecuencia sana.
-- 2.0 a 2.5: "Mostrando síntomas de ir al camino de la saturación". Sugiere monitoreo.
-- 2.5 a 3.0: "Alerta". El público está viendo demasiado el anuncio.
-- Mayor a 3.0: "Alta". Saturación crítica.
-- ¡IMPORTANTE!: Si la frecuencia está entre 1.0 y 2.0, elogia la frescura del anuncio. Jamás menciones saturación en este rango.
+REGLAS DE FRECUENCIA (INNEGOCIABLES):
+- 1.0 a 2.0: "Aceptable". Es una frecuencia sana e ideal. JAMÁS digas que es alta o que satura.
+- 2.0 a 2.5: "Mostrando síntomas de saturación".
+- 2.5 a 3.0: "Alerta de Saturación".
+- Mayor a 3.0: "Alta Saturación".
 
-TU TAREA:
-1. Explica la Estrategia Global: Describe la arquitectura de la cuenta.
-2. Explica el Rol de las Campañas: Define para qué sirve cada una en el ecosistema de ventas del cliente.
-3. Foco en Negocios: Habla de "eficiencia del capital", "rentabilidad" y "protección de la inversión".
-4. Tono: Seguro, profesional y directo.
+INSTRUCCIONES PARA EL DIAGNÓSTICO GLOBAL:
+1. ARQUITECTURA DE CUENTA: Explica el ecosistema. Cómo las campañas se ayudan entre sí (ej. "La campaña de tráfico alimenta a la de mensajes" o "Estamos en una etapa de pura captación de demanda").
+2. FOCO EN EL CLIENTE: Habla de rentabilidad, eficiencia de capital y flujo de caja. Que el cliente sienta que controlas su negocio, no solo sus clics.
+
+INSTRUCCIONES PARA EL ANÁLISIS DE CADA CAMPAÑA:
+1. OBJETIVO PRIMARIO: El análisis DEBE empezar evaluando si la campaña está cumpliendo su objetivo (ej. si es de Compras, habla de Compras primero). 
+2. MÉTRICAS SECUNDARIAS: Después de evaluar el objetivo, menciona Frecuencia, CTR o clics para explicar el porqué del resultado.
+3. CONTEXTO: Si una campaña tiene frecuencia 1.15 y pocos resultados, NO es saturación; busca el problema en el CTR o la Oferta.
 
 Devuelve UNICAMENTE JSON válido:
 {
   "score": ${scoreBase},
   "urgencia": "string (según la escala)",
-  "diagnostico_general": "Narrativa estratégica global dirigida al dueño del negocio...",
+  "diagnostico_general": "Narrativa detallada de la arquitectura global y salud del negocio...",
   "analisis_campañas": [
-    { "id": "string", "feedback_ia": "Análisis táctico del rol de esta campaña. Se preciso con los números y usa las etiquetas de frecuencia correctas.", "status_ia": "success/warning/danger" }
+    { "id": "string", "feedback_ia": "Análisis prioritario por objetivo + diagnóstico táctico secundario", "status_ia": "success/warning/danger" }
   ],
-  "plan_accion": ["Paso 1", "Paso 2"],
-  "insight_publico": "Breve resumen ejecutivo sobre el comportamiento del público detectado"
+  "plan_accion": ["Paso 1 estratégico", "Paso 2 estratégico"],
+  "insight_publico": "Análisis ejecutivo del comportamiento del público"
 }
 
 Datos de las campañas:
@@ -277,7 +271,7 @@ ${JSON.stringify(campañasSimplificadas, null, 2)}
             model: "gpt-4o-mini",
             temperature: 0.3, 
             messages: [
-                { role: "system", content: "Eres Luciano Federico Juarez. Experto en explicar estrategias de Meta Ads en lenguaje de negocios. Eres extremadamente preciso con los rangos numéricos y sigues las reglas de frecuencia al pie de la letra." },
+                { role: "system", content: "Eres Luciano Federico Juarez. Tu diagnóstico debe ser descriptivo, estratégico y centrado en los objetivos de negocio del cliente." },
                 { role: "user", content: prompt }
             ]
         });
@@ -294,9 +288,9 @@ ${JSON.stringify(campañasSimplificadas, null, 2)}
         return {
             score: scoreBase,
             urgencia: "ESTABLE",
-            diagnostico_general: "Análisis técnico de rendimiento completado satisfactoriamente.",
+            diagnostico_general: "Análisis estratégico disponible. Revisar métricas individuales.",
             analisis_campañas: [],
-            plan_accion: ["Monitorear costos de adquisición"],
+            plan_accion: ["Monitorear objetivos de conversión"],
             analisis_publico_por_campaña: publicoData
         };
     }
@@ -313,7 +307,7 @@ app.post("/analizar", async (req, res) => {
         res.json(resultado);
     } catch (err) {
         console.error(err);
-        res.status(500).json({ error: "Fallo en el motor estratégico de ReportAds" });
+        res.status(500).json({ error: "Error en el motor estratégico" });
     }
 });
 
