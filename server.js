@@ -63,7 +63,7 @@ async function obtenerTipoCambio(currency) {
 }
 
 //////////////////////////////////////////////////////////
-// 3. DETECCIÓN DE OBJETIVOS (LÓGICA ESTRATÉGICA)
+// 3. DETECCIÓN DE OBJETIVOS (LÓGICA ESTRATÉGICA MEJORADA)
 //////////////////////////////////////////////////////////
 
 function detectarObjetivo(c) {
@@ -74,6 +74,7 @@ function detectarObjetivo(c) {
     const convEvent = (c.conversion_event || "").toUpperCase();
     const campName = (c.name || "").toUpperCase(); 
 
+    // 1. Lógica prioritaria para MENSAJES
     if (
         convLocation.includes("MESSAGE") ||
         convLocation.includes("WHATSAPP") ||
@@ -87,18 +88,33 @@ function detectarObjetivo(c) {
         campName.includes("WHATSAPP")
     ) return "message";
 
+    // 2. Lógica para Clientes Potenciales (Leads)
     if (objective.includes("LEAD") || optGoal.includes("LEAD") || campName.includes("LEAD"))
         return "lead";
 
+    // 3. Lógica para Compras y Carritos
     if (convEvent.includes("PURCHASE") || optGoal.includes("PURCHASE") || campName.includes("COMPRA"))
         return "purchase";
-
     if (convEvent.includes("ADD_TO_CART") || optGoal.includes("ADD_TO_CART") || campName.includes("CARRITO"))
         return "cart";
 
-    if (objective.includes("TRAFFIC") && perfGoal.includes("PROFILE"))
-        return "profile_visit";
+    // 4. Lógica para LPV / View Content (Tráfico a Web)
+    if (
+        convEvent.includes("VIEW_CONTENT") || 
+        convEvent.includes("CONTENT_VIEW") ||
+        optGoal.includes("LANDING_PAGE_VIEWS") ||
+        campName.includes("VIEW CONTENT") ||
+        campName.includes("LPV")
+    ) return "lpv";
 
+    // 5. Lógica para Visitas al Perfil (Tráfico Instagram)
+    if (
+        (objective.includes("TRAFFIC") && perfGoal.includes("PROFILE")) ||
+        campName.includes("TRAFICO INSTAGRAM") ||
+        campName.includes("PERFIL")
+    ) return "profile_visit";
+
+    // 6. Tráfico Genérico
     if (objective.includes("TRAFFIC") || objective.includes("OUTCOME_TRAFFIC") || campName.includes("TRAFICO"))
         return "lpv";
 
@@ -170,11 +186,13 @@ async function calcularScoreMatematico(data, currency) {
         const objetivo = detectarObjetivo(c);
         let resultados = 0;
 
+        // Selección de métrica según el objetivo detectado
         if (objetivo === "message") resultados = n(c.msg);
         else if (objetivo === "lead") resultados = n(c.leads);
         else if (objetivo === "purchase") resultados = n(c.pur);
         else if (objetivo === "cart") resultados = n(c.cart);
-        else if (objetivo === "lpv") resultados = n(c.lpv);
+        else if (objetivo === "lpv") resultados = n(c.lpv) || n(c.clicks);
+        else if (objetivo === "profile_visit") resultados = n(c.clicks);
         else resultados = n(c.clicks);
 
         const costoARS = resultados > 0 ? (spend / resultados) * rate : null;
@@ -186,11 +204,10 @@ async function calcularScoreMatematico(data, currency) {
 
         if (spend > 0 && resultados === 0) score -= 1.8;
 
-        // NUEVA LÓGICA DE FRECUENCIA
         const freq = n(c.freq);
-        if (freq > 2.0 && freq <= 2.5) score -= 0.5; // Síntomas
-        if (freq > 2.5 && freq <= 3.0) score -= 1.2; // Alerta
-        if (freq > 3.0) score -= 2.0; // Alta
+        if (freq > 2.0 && freq <= 2.5) score -= 0.5; 
+        if (freq > 2.5 && freq <= 3.0) score -= 1.2; 
+        if (freq > 3.0) score -= 2.0; 
     }
 
     return Number(Math.min(10, Math.max(0, score)).toFixed(1));
@@ -214,6 +231,8 @@ async function analizarConIA(data, currency) {
         mensajes: n(c.msg),
         leads: n(c.leads),
         compras: n(c.pur),
+        visitas_web: n(c.lpv),
+        clicks: n(c.clicks),
         status: c.effective_status
     }));
 
@@ -223,7 +242,7 @@ Tu misión es EXPLICAR la lógica estratégica y el propósito de la cuenta al d
 
 PUNTAJE GLOBAL: ${scoreBase}
 
-ESCALA DE SCORE (OBLIGATORIA):
+ESCALA DE SCORE (MANDATORIA):
 - 0.0 a 1.0: "ALERTA MÁXIMA"
 - 1.1 a 2.0: "CUIDADO"
 - 2.1 a 3.0: "CRÍTICO"
@@ -235,26 +254,27 @@ ESCALA DE SCORE (OBLIGATORIA):
 - 8.1 a 9.0: "ARRIBA DEL PROMEDIO"
 - 9.1 a 10.0: "CASI PERFECTO"
 
-REGLAS DE INTERPRETACIÓN DE FRECUENCIA (INNEGOCIABLES):
-- 1.0 a 2.0: "Aceptable" (Ideal).
+REGLAS DE FRECUENCIA (INNEGOCIABLES):
+- 1.0 a 2.0: "Aceptable" (Ideal). Elogia la frescura.
 - 2.0 a 2.5: "Mostrando síntomas de ir al camino de la saturación".
 - 2.5 a 3.0: "ALERTA". (Si es 2.75, es ALERTA, jamás aceptable).
 - > 3.0: "Alta saturación".
 
 REGLAS ESTRATÉGICAS:
 1. NO OPTIMIZACIÓN: Prohibido dar consejos, soluciones o decir "deberías hacer X". Solo explica QUÉ se está haciendo y PARA QUÉ.
-2. PROPÓSITO DE MENSAJES: Si la campaña es de Mensajes, explica que el fin es CONSEGUIR MENSAJES y conversaciones para vender. Ignora si Meta lo llama "Interacción".
-3. LENGUAJE: Usa "arquitectura de cuenta", "eficiencia de capital" e "intención de compra".
+2. PROPÓSITO DE MENSAJES: Si el objetivo detectado es 'message', explica que el fin es CONSEGUIR MENSAJES y conversaciones para vender. Olvida si Meta dice "Interacción".
+3. PROPÓSITO DE WEB / VIEW CONTENT: Si el objetivo es 'lpv', explica que se busca generar tráfico de calidad a la web para alimentar el píxel y reconocimiento.
+4. LENGUAJE: Usa "arquitectura de cuenta", "eficiencia de capital" e "intención de compra".
 
 Devuelve JSON:
 {
   "score": ${scoreBase},
   "urgencia": "string (según la escala de 10 niveles arriba)",
-  "diagnostico_general": "Narrativa sobre la arquitectura estratégica global de la cuenta.",
+  "diagnostico_general": "Narrativa detallada sobre la arquitectura estratégica global de la cuenta.",
   "analisis_campañas": [
     { 
       "id": "string", 
-      "feedback_ia": "Explica el propósito estratégico de esta campaña y qué está logrando respecto a su fin real (ej. captar mensajes). Sigue las reglas de frecuencia estrictamente.", 
+      "feedback_ia": "Explica el propósito estratégico de esta campaña y qué está logrando respecto a su fin real. Sé preciso con la frecuencia.", 
       "status_ia": "success/warning/danger" 
     }
   ],
