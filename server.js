@@ -11,7 +11,7 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Inicialización de OpenAI con la API Key del entorno
+// Inicialización de OpenAI
 const openai = new OpenAI({
     apiKey: process.env.OPENAI_API_KEY,
 });
@@ -20,10 +20,6 @@ const openai = new OpenAI({
 // 1. CONFIGURACIÓN ESTRATÉGICA Y BENCHMARKS (ARS)
 //////////////////////////////////////////////////////////
 
-/**
- * Benchmarks de Luciano Federico Juarez para el mercado argentino.
- * Estos valores permiten al motor matemático evaluar el costo de adquisición.
- */
 const BENCHMARK_ARS = {
     message: { acceptable: 1000, high: 2000 },
     lead: { acceptable: 15000, high: 30000 },
@@ -33,7 +29,6 @@ const BENCHMARK_ARS = {
     lpv: { acceptable: 500, high: 1200 }
 };
 
-// Caché global para el tipo de cambio
 let exchangeCache = {
     rate: 1,
     currency: "ARS",
@@ -41,15 +36,11 @@ let exchangeCache = {
 };
 
 //////////////////////////////////////////////////////////
-// 2. UTILIDADES MATEMÁTICAS Y DIVISAS (NORMALIZACIÓN)
+// 2. UTILIDADES MATEMÁTICAS Y DIVISAS
 //////////////////////////////////////////////////////////
 
 const n = (v) => Number(v) || 0;
 
-/**
- * Normaliza cualquier moneda a Pesos Argentinos (ARS) para auditorías comparables.
- * Cache de 1 hora para evitar latencia innecesaria.
- */
 async function obtenerTipoCambio(currency) {
     if (currency === "ARS") return 1;
 
@@ -72,13 +63,9 @@ async function obtenerTipoCambio(currency) {
 }
 
 //////////////////////////////////////////////////////////
-// 3. DETECCIÓN TÉCNICA DE OBJETIVOS (JERARQUÍA BLINDADA)
+// 3. DETECCIÓN DE OBJETIVOS (PRIORIDAD AL NOMBRE)
 //////////////////////////////////////////////////////////
 
-/**
- * Determina el objetivo real de la campaña cruzando múltiples campos técnicos.
- * Ignora etiquetas genéricas de Meta y prioriza el propósito de negocio.
- */
 function detectarObjetivo(c) {
     const objective = (c.objective || "").toUpperCase();
     const optGoal = (c.optimization_goal || "").toUpperCase();
@@ -87,36 +74,37 @@ function detectarObjetivo(c) {
     const convEvent = (c.conversion_event || "").toUpperCase();
     const campName = (c.name || "").toUpperCase(); 
 
-    // A. PRIORIDAD 1: EVENTOS TÉCNICOS ESPECÍFICOS (Píxel/API)
+    // A. PRIORIDAD ABSOLUTA: LA INTENCIÓN DEL USUARIO EN EL NOMBRE
+    // Evaluamos en un orden lógico para evitar choques (ej: "Trafico WSP" es Mensaje, no LPV)
+    
+    if (campName.includes("MENSAJE") || campName.includes("WSP") || campName.includes("WHA") || campName.includes("CHAT") || campName.includes("DM")) return "message";
+    
+    // Si dice IG o Perfil, es profile_visit (gana sobre la palabra "Trafico")
+    if (campName.includes("IG") || campName.includes("INSTA") || campName.includes("PERFIL")) return "profile_visit";
+    
+    if (campName.includes("COMPRA") || campName.includes("PURCHASE") || campName.includes("VENTA")) return "purchase";
+    
+    if (campName.includes("LEAD") || campName.includes("POTENCIAL") || campName.includes("FORMULARIO")) return "lead";
+    
+    // Si dice Web, View Content o LPV
+    if (campName.includes("WEB") || campName.includes("VIEW CONTENT") || campName.includes("LPV") || campName.includes("LANDING") || campName.includes("TRAFICO")) return "lpv";
+
+    // B. PRIORIDAD 2: EVENTOS TÉCNICOS EXPLÍCITOS
     if (convEvent === "PURCHASE" || convEvent === "COMPRA") return "purchase";
     if (convEvent === "LEAD" || convEvent === "CONTACTO") return "lead";
     if (convEvent === "VIEW_CONTENT" || convEvent === "CONTENT_VIEW") return "lpv";
     if (convEvent === "ADD_TO_CART") return "cart";
 
-    // B. PRIORIDAD 2: METAS DE RENDIMIENTO (Performance Goals)
+    // C. PRIORIDAD 3: METAS Y UBICACIONES (MÁS AMBIGUO EN META)
     if (perfGoal.includes("INSTAGRAM_PROFILE_VISIT") || perfGoal.includes("PROFILE_VISIT")) return "profile_visit";
-    if (perfGoal.includes("LANDING_PAGE_VIEWS")) return "lpv";
+    if (optGoal.includes("LANDING_PAGE_VIEWS")) return "lpv";
+    if (convLocation.includes("WHATSAPP") || convLocation.includes("INSTAGRAM_DIRECT")) return "message";
 
-    // C. PRIORIDAD 3: UBICACIÓN Y APP DE MENSAJERÍA (Directo)
-    if (
-        convLocation.includes("WHATSAPP") || 
-        convLocation.includes("MESSAGING_APP") || 
-        convLocation.includes("INSTAGRAM_DIRECT") ||
-        optGoal.includes("CONVERSATIONS")
-    ) return "message";
-
-    // D. PLAN B: LÓGICA POR NOMBRE DE CAMPAÑA (Último recurso)
-    if (campName.includes("MENSAJE") || campName.includes("WSP") || campName.includes("WHA")) return "message";
-    if (campName.includes("LEAD") || campName.includes("POTENCIAL")) return "lead";
-    if (campName.includes("COMPRA") || campName.includes("PURCHASE") || campName.includes("VENTA")) return "purchase";
-    if (campName.includes("PERFIL") || campName.includes("IG PROFILE")) return "profile_visit";
-    if (campName.includes("LPV") || campName.includes("WEB") || campName.includes("CONTENT")) return "lpv";
-
-    // E. FALLBACK POR OBJETIVO GENERAL
-    if (objective.includes("MESSAGES") || objective.includes("ENGAGEMENT")) return "message";
-    if (objective.includes("LEADS")) return "lead";
-    if (objective.includes("CONVERSIONS")) return "purchase";
-    if (objective.includes("TRAFFIC")) return "lpv";
+    // D. FALLBACK: OBJETIVOS GENERALES DE CAMPAÑA
+    if (objective.includes("OUTCOME_TRAFFIC") || objective.includes("TRAFFIC")) return "lpv";
+    if (objective.includes("OUTCOME_LEADS") || objective.includes("LEADS")) return "lead";
+    if (objective.includes("OUTCOME_SALES") || objective.includes("CONVERSIONS")) return "purchase";
+    if (objective.includes("OUTCOME_ENGAGEMENT") || objective.includes("MESSAGES")) return "message";
 
     return "unknown";
 }
@@ -130,12 +118,9 @@ function evaluarCalidadCosto(objetivo, costoARS) {
 }
 
 //////////////////////////////////////////////////////////
-// 4. ANÁLISIS DE PÚBLICOS (DETERMINACIÓN DE GANADORES)
+// 4. ANÁLISIS DE PÚBLICOS (EDAD, GÉNERO, GEOGRAFÍA)
 //////////////////////////////////////////////////////////
 
-/**
- * Procesa breakdowns para extraer insights demográficos reales.
- */
 function analizarPublicoPorCampaña(data) {
     const campañas = data.campañas_detalle || [];
     return campañas.map(c => {
@@ -168,7 +153,7 @@ function analizarPublicoPorCampaña(data) {
 }
 
 //////////////////////////////////////////////////////////
-// 5. MOTOR DE SCORE MATEMÁTICO (EFICIENCIA DE CAPITAL)
+// 5. MOTOR DE SCORE MATEMÁTICO
 //////////////////////////////////////////////////////////
 
 async function calcularScoreMatematico(data, currency) {
@@ -180,30 +165,27 @@ async function calcularScoreMatematico(data, currency) {
         const objetivo = detectarObjetivo(c);
         let resultados = 0;
 
-        // Selección de métrica según el objetivo técnico real detectado
-        if (objetivo === "message") resultados = n(c.msg);
-        else if (objetivo === "lead") resultados = n(c.leads);
-        else if (objetivo === "purchase") resultados = n(c.pur);
-        else if (objetivo === "lpv") resultados = n(c.lpv) || n(c.view_content) || n(c.clicks);
-        else if (objetivo === "profile_visit") resultados = n(c.clicks);
+        // Extraemos el resultado real que corresponde al objetivo
+        if (objetivo === "message") resultados = n(c.msg) || n(c.resultados_obj);
+        else if (objetivo === "lead") resultados = n(c.leads) || n(c.resultados_obj);
+        else if (objetivo === "purchase") resultados = n(c.pur) || n(c.resultados_obj);
+        else if (objetivo === "lpv") resultados = n(c.view_content) || n(c.lpv) || n(c.resultados_obj) || n(c.clicks);
+        else if (objetivo === "profile_visit") resultados = n(c.resultados_obj) || n(c.clicks);
         else resultados = n(c.clicks);
 
         const costoARS = resultados > 0 ? (spend / resultados) * rate : null;
         const nivel = evaluarCalidadCosto(objetivo, costoARS);
 
-        // Ajustes de Score
         if (nivel === "success") score += 0.8;
         if (nivel === "warning") score -= 0.4;
         if (nivel === "danger") score -= 1.2;
         if (spend > 0 && resultados === 0) score -= 1.8;
 
-        // Frecuencia (Saturación)
         const freq = n(c.freq);
         if (freq > 2.0 && freq <= 2.5) score -= 0.5; 
         if (freq > 2.5 && freq <= 3.0) score -= 1.2; 
         if (freq > 3.0) score -= 2.0; 
 
-        // Bonificación por ROAS en e-commerce
         if (objetivo === "purchase" && spend > 0) {
             const roas = n(c.val) / spend;
             if (roas >= 2.5) score += 1.0;
@@ -214,28 +196,28 @@ async function calcularScoreMatematico(data, currency) {
 }
 
 //////////////////////////////////////////////////////////
-// 6. MOTOR IA: ESTRATEGIA Y ARQUITECTURA (CONSULTORÍA)
+// 6. MOTOR IA: ESTRATEGIA Y ARQUITECTURA (BLINDADA)
 //////////////////////////////////////////////////////////
 
 async function analizarConIA(data, currency) {
     const scoreBase = await calcularScoreMatematico(data, currency);
     const publicoData = analizarPublicoPorCampaña(data);
 
-    // Filtrado de datos para evitar que la IA mezcle objetivos
+    // Filtrado riguroso: Solo mandamos el resultado que importa
     const campañasFiltradas = (data.campañas_detalle || []).map(c => {
         const obj = detectarObjetivo(c);
-        let resultado_principal = 0;
+        let resultado_principal = n(c.resultados_obj) || 0;
         
-        if (obj === "message") resultado_principal = n(c.msg);
-        else if (obj === "lead") resultado_principal = n(c.leads);
-        else if (obj === "purchase") resultado_principal = n(c.pur);
-        else if (obj === "lpv") resultado_principal = n(c.lpv) || n(c.view_content) || n(c.clicks);
-        else if (obj === "profile_visit") resultado_principal = n(c.clicks);
+        if (obj === "message") resultado_principal = n(c.msg) || n(c.resultados_obj);
+        else if (obj === "lead") resultado_principal = n(c.leads) || n(c.resultados_obj);
+        else if (obj === "purchase") resultado_principal = n(c.pur) || n(c.resultados_obj);
+        else if (obj === "lpv") resultado_principal = n(c.view_content) || n(c.lpv) || n(c.resultados_obj) || n(c.clicks);
+        else if (obj === "profile_visit") resultado_principal = n(c.resultados_obj) || n(c.clicks);
 
         return {
             id: c.id,
             name: c.name,
-            objetivo_detectado: obj,
+            objetivo_asignado: obj,
             inversion: n(c.spend),
             frecuencia: n(c.freq),
             ctr: n(c.ctr_meta),
@@ -255,50 +237,49 @@ ESCALA DE SCORE (MANDATORIA):
 - 4.1-5.0: OPTIMIZAR | 5.1-6.0: MEJORAR RENDIMIENTO | 6.1-7.0: ESTABLE
 - 7.1-8.0: VAS POR BUEN CAMINO | 8.1-9.0: ARRIBA DEL PROMEDIO | 9.1-10.0: CASI PERFECTO
 
-REGLAS ESTRATÉGICAS INNEGOCIABLES:
-1. FOCO EN EL PROPÓSITO: Si es 'message', explica que buscamos CONSEGUIR MENSAJES directos para ventas. Ignora si Meta dice 'interacción'.
-2. SIN MEZCLAS: Si es mensajes, NO menciones compras ni leads. Céntrate en su 'resultado_principal'.
-3. LPV / VIEW CONTENT: Si es 'lpv', explica que se busca tráfico de calidad para alimentar el ecosistema y el píxel.
-4. PERFIL INSTAGRAM: Si es 'profile_visit', explica que el fin es ganar autoridad y posicionamiento de marca.
-5. NO OPTIMIZACIÓN: Solo explica QUÉ se está haciendo y PARA QUÉ (estrategia y propósito).
+DICCIONARIO DE OBJETIVOS (CÓMO DEBES EXPLICARLOS):
+- Si objetivo_asignado es 'message': El propósito es captar MENSAJES y conversaciones directas para el equipo de ventas. (Prohibido decir "interacción").
+- Si objetivo_asignado es 'lpv': El propósito es llevar TRÁFICO A LA WEB (View Content / Landing Page) para captar intención de compra o alimentar el ecosistema.
+- Si objetivo_asignado es 'profile_visit': El propósito es llevar visitas al PERFIL DE INSTAGRAM para generar autoridad y retargeting.
+- Si objetivo_asignado es 'purchase': El propósito es generar VENTAS E-COMMERCE.
+- Si objetivo_asignado es 'lead': El propósito es captar CONTACTOS calificados.
 
-REGLAS DE FRECUENCIA:
-- 1.0 a 2.0: "Aceptable" (Ideal).
-- 2.0 a 2.5: "Mostrando síntomas de ir al camino de la saturación".
-- 2.5 a 3.0: "ALERTA". (Frecuencias como 2.75 son alerta roja).
-- > 3.0: "Alta saturación".
+REGLAS DE ORO:
+1. NO MEZCLAR: Solo habla del resultado_principal asignado. No hables de leads en una campaña de web, ni de ventas en una de mensajes.
+2. NO OPTIMIZAR: Prohibido dar consejos de "mejorar la creatividad" o "cambiar el público". Solo explica qué se hace y el propósito.
+3. FRECUENCIA: 1.0 a 2.0 es "Aceptable/Sana". 2.1 a 2.5 es "Síntomas de saturación". Más de 2.5 es "Alerta".
 
 Devuelve JSON:
 {
   "score": ${scoreBase},
   "urgencia": "string (de la escala de 10 niveles arriba)",
-  "diagnostico_general": "Narrativa profunda sobre la arquitectura estratégica global de la cuenta y salud de la inversión.",
+  "diagnostico_general": "Narrativa sobre la arquitectura estratégica global de la cuenta y el propósito de la inversión conjunta.",
   "analisis_campañas": [
     { 
       "id": "string", 
-      "feedback_ia": "Explica el propósito estratégico de esta campaña y su logro respecto a su fin real. Sin mezclar métricas de otros objetivos.", 
+      "feedback_ia": "Explica el propósito de esta campaña basado estrictamente en su 'objetivo_asignado' y cómo se desempeñó. Sin dar soluciones.", 
       "status_ia": "success/warning/danger" 
     }
   ],
-  "insight_publico": "Análisis ejecutivo de la respuesta de la audiencia a la estrategia actual."
+  "insight_publico": "Análisis ejecutivo de la respuesta de la audiencia."
 }
 
-DATOS: ${JSON.stringify(campañasFiltradas, null, 2)}
+DATOS ESTRUCTURADOS DE CAMPAÑAS:
+${JSON.stringify(campañasFiltradas, null, 2)}
 `;
 
     try {
         const response = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            temperature: 0.2, 
+            temperature: 0.1, // Temperatura reducida a 0.1 para que se ciña 100% al diccionario de objetivos
             messages: [
-                { role: "system", content: "Eres Luciano Federico Juarez. Estratega senior. Explicas el propósito de la cuenta al cliente sin dar consejos técnicos." },
+                { role: "system", content: "Eres Luciano Federico Juarez. Estratega senior. Te enfocas exclusivamente en explicar propósitos estratégicos sin mezclar conceptos." },
                 { role: "user", content: prompt }
             ]
         });
         const aiRes = JSON.parse(response.choices[0].message.content.replace(/```json|```/g, ""));
         return { ...aiRes, analisis_publico_por_campaña: publicoData };
     } catch (error) {
-        console.error("❌ Error IA:", error);
         return { score: scoreBase, urgencia: "ESTABLE", diagnostico_general: "Error al generar narrativa estratégica.", analisis_campañas: [], analisis_publico_por_campaña: publicoData };
     }
 }
@@ -309,11 +290,9 @@ DATOS: ${JSON.stringify(campañasFiltradas, null, 2)}
 
 app.post("/analizar", async (req, res) => {
     try {
-        const currency = req.body.currency || "ARS";
-        const resultado = await analizarConIA(req.body, currency);
+        const resultado = await analizarConIA(req.body, req.body.currency || "ARS");
         res.json(resultado);
     } catch (err) {
-        console.error("❌ Error Server:", err);
         res.status(500).json({ error: "Fallo en motor estratégico" });
     }
 });
